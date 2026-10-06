@@ -130,10 +130,12 @@ mod test {
     #[test]
     fn test_initialize() {
         let env = Env::default();
-        let contract_id = env.register_contract(None, AssetFactory);
+        let contract_id = env.register(AssetFactory, ());
         let client = AssetFactoryClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
+        
+        env.mock_all_auths();
         client.initialize(&admin);
 
         assert_eq!(client.get_admin(), admin);
@@ -143,12 +145,13 @@ mod test {
     #[test]
     fn test_create_asset() {
         let env = Env::default();
-        let contract_id = env.register_contract(None, AssetFactory);
+        let contract_id = env.register(AssetFactory, ());
         let client = AssetFactoryClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
         let owner = Address::generate(&env);
 
+        env.mock_all_auths();
         client.initialize(&admin);
 
         let asset_id = client.create_asset(

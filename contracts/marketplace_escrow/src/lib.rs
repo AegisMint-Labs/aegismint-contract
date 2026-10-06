@@ -246,10 +246,12 @@ mod test {
     #[test]
     fn test_initialize() {
         let env = Env::default();
-        let contract_id = env.register_contract(None, MarketplaceEscrow);
+        let contract_id = env.register(MarketplaceEscrow, ());
         let client = MarketplaceEscrowClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
+        
+        env.mock_all_auths();
         client.initialize(&admin);
 
         assert_eq!(client.get_admin(), admin);
@@ -259,7 +261,7 @@ mod test {
     #[test]
     fn test_create_and_complete_escrow() {
         let env = Env::default();
-        let contract_id = env.register_contract(None, MarketplaceEscrow);
+        let contract_id = env.register(MarketplaceEscrow, ());
         let client = MarketplaceEscrowClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
@@ -267,6 +269,7 @@ mod test {
         let buyer = Address::generate(&env);
         let token = Address::generate(&env);
 
+        env.mock_all_auths();
         client.initialize(&admin);
 
         let escrow_id = client.create_escrow(&seller, &buyer, &token, &1000);
@@ -286,7 +289,7 @@ mod test {
     #[test]
     fn test_dispute_resolution() {
         let env = Env::default();
-        let contract_id = env.register_contract(None, MarketplaceEscrow);
+        let contract_id = env.register(MarketplaceEscrow, ());
         let client = MarketplaceEscrowClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
@@ -294,6 +297,7 @@ mod test {
         let buyer = Address::generate(&env);
         let token = Address::generate(&env);
 
+        env.mock_all_auths();
         client.initialize(&admin);
 
         let escrow_id = client.create_escrow(&seller, &buyer, &token, &1000);

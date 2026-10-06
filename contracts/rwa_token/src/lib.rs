@@ -86,3 +86,69 @@ impl RwaTokenContract {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Env};
+
+    #[test]
+    fn test_initialize() {
+        let env = Env::default();
+        let contract_id = env.register(RwaTokenContract, ());
+        let client = RwaTokenContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        
+        env.mock_all_auths();
+        client.initialize(&admin);
+
+        // Test that we can't initialize twice
+        let result = std::panic::catch_unwind(|| {
+            client.initialize(&admin);
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_whitelist_and_transfer() {
+        let env = Env::default();
+        let contract_id = env.register(RwaTokenContract, ());
+        let client = RwaTokenContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+
+        env.mock_all_auths();
+        
+        client.initialize(&admin);
+        
+        // Whitelist users
+        client.set_whitelist(&user1, &true);
+        client.set_whitelist(&user2, &true);
+
+        // Initially balances should be 0
+        assert_eq!(client.balance(&user1), 0);
+        assert_eq!(client.balance(&user2), 0);
+    }
+
+    #[test]
+    fn test_transfer_without_whitelist() {
+        let env = Env::default();
+        let contract_id = env.register(RwaTokenContract, ());
+        let client = RwaTokenContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+
+        env.mock_all_auths();
+        
+        client.initialize(&admin);
+
+        // Try to transfer without whitelisting (should fail)
+        let result = client.try_transfer(&user1, &user2, &100);
+        assert_eq!(result, Err(Ok(Error::NotWhitelisted)));
+    }
+}
