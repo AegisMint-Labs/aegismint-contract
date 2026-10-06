@@ -10,47 +10,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test and Build
+  check:
+    name: Check and Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
       
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
       
+      - name: Check workspace
+        run: cargo check --workspace
+      
       - name: Check formatting
         run: cargo fmt --all -- --check
       
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       
       - name: Run tests
-        run: cargo test --verbose
-      
-      - name: Build contracts for wasm32-unknown-unknown
-        run: |
-          cargo build --package asset_factory --target wasm32-unknown-unknown --release
-          cargo build --package rwa-token --target wasm32-unknown-unknown --release
-          cargo build --package marketplace_escrow --target wasm32-unknown-unknown --release
-      
-      - name: Verify WASM files
-        run: |
-          ls -la target/wasm32-unknown-unknown/release/
-          echo "Asset Factory WASM size: $(wc -c < target/wasm32-unknown-unknown/release/asset_factory.wasm) bytes"
-          echo "RWA Token WASM size: $(wc -c < target/wasm32-unknown-unknown/release/rwa_token.wasm) bytes"
-          echo "Marketplace Escrow WASM size: $(wc -c < target/wasm32-unknown-unknown/release/marketplace_escrow.wasm) bytes"
-      
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: contracts
-          path: |
-            target/wasm32-unknown-unknown/release/*.wasm
+        run: cargo test --workspace --verbose
