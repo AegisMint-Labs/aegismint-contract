@@ -1,8 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, Env,
-};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -104,7 +102,7 @@ impl RwaTokenContract {
             .persistent()
             .extend_ttl(&DataKey::Balance(to.clone()), 172800, 172800);
 
-        // Event publishing temporarily removed due to SDK compatibility issues  
+        // Event publishing temporarily removed due to SDK compatibility issues
         // TODO: Re-implement with proper event system
 
         Ok(())
