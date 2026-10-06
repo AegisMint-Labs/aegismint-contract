@@ -51,8 +51,14 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
       
-      - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli --features opt
+      - name: Install Stellar CLI via script
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Verify Stellar CLI
+        run: |
+          stellar --version
       
       - name: Build contracts
         run: |
@@ -62,7 +68,6 @@ jobs:
       
       - name: Verify WASM files
         run: |
-          ls -la target/wasm32-unknown-unknown/release/
           find target -name "*.wasm" -exec ls -la {} \;
       
       - name: Upload artifacts
