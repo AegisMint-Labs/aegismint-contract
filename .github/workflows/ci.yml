@@ -16,58 +16,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust 1.90
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-      
-      - name: Verify Rust version and add target
-        run: |
-          source ~/.cargo/env
-          rustc --version
-          # Try to add wasm32v1-none target, fall back to wasm32-unknown-unknown if not available
-          if rustup target add wasm32v1-none; then
-            echo "wasm32v1-none target successfully installed"
-            echo "WASM_TARGET=wasm32v1-none" >> $GITHUB_ENV
-          else
-            echo "wasm32v1-none target not available, falling back to wasm32-unknown-unknown"
-            rustup target add wasm32-unknown-unknown
-            echo "WASM_TARGET=wasm32-unknown-unknown" >> $GITHUB_ENV
-          fi
-          rustup component add rustfmt clippy
-      
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
       
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-      
-      - name: Cache cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-      
-      - name: Run tests
-        run: |
-          source ~/.cargo/env
-          cargo test --verbose
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
       
       - name: Check formatting
-        run: |
-          source ~/.cargo/env
-          cargo fmt -- --check
+        run: cargo fmt --all -- --check
       
       - name: Run clippy
-        run: |
-          source ~/.cargo/env
-          cargo clippy -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      
+      - name: Run tests
+        run: cargo test --verbose
 
   build:
     name: Build WASM
@@ -76,60 +42,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust 1.90
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
       
-      - name: Verify Rust version and add target
-        run: |
-          source ~/.cargo/env
-          rustc --version
-          # Try to add wasm32v1-none target, fall back to wasm32-unknown-unknown if not available
-          if rustup target add wasm32v1-none; then
-            echo "wasm32v1-none target successfully installed"
-            echo "WASM_TARGET=wasm32v1-none" >> $GITHUB_ENV
-          else
-            echo "wasm32v1-none target not available, falling back to wasm32-unknown-unknown"
-            rustup target add wasm32-unknown-unknown
-            echo "WASM_TARGET=wasm32-unknown-unknown" >> $GITHUB_ENV
-          fi
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
       
-      - name: Install system dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y libdbus-1-dev pkg-config libudev-dev
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli --features opt
       
-      - name: Install Soroban CLI
+      - name: Build contracts
         run: |
-          source ~/.cargo/env
-          cargo install soroban-cli
+          stellar contract build --package asset_factory
+          stellar contract build --package rwa-token  
+          stellar contract build --package marketplace_escrow
       
-      - name: Build asset_factory
+      - name: Verify WASM files
         run: |
-          source ~/.cargo/env
-          cargo build --package asset_factory --target $WASM_TARGET --release
-          soroban contract optimize \
-            --wasm target/$WASM_TARGET/release/asset_factory.wasm
-      
-      - name: Build rwa_token
-        run: |
-          source ~/.cargo/env
-          cargo build --package rwa_token --target $WASM_TARGET --release
-          soroban contract optimize \
-            --wasm target/$WASM_TARGET/release/rwa_token.wasm
-      
-      - name: Build marketplace_escrow
-        run: |
-          source ~/.cargo/env
-          cargo build --package marketplace_escrow --target $WASM_TARGET --release
-          soroban contract optimize \
-            --wasm target/$WASM_TARGET/release/marketplace_escrow.wasm
+          ls -la target/wasm32-unknown-unknown/release/
+          find target -name "*.wasm" -exec ls -la {} \;
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: contracts
           path: |
-            target/*/release/*.wasm
-            target/*/release/*.optimized.wasm
+            target/wasm32-unknown-unknown/release/*.wasm
