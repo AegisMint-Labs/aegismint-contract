@@ -16,16 +16,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt, clippy
+      - name: Install Rust 1.84
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.84.0
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
-      - name: Add wasm32v1-none target
-        run: rustup target add wasm32v1-none
+      - name: Verify Rust version and add target
+        run: |
+          source ~/.cargo/env
+          rustc --version
+          rustup target add wasm32v1-none
+          rustup component add rustfmt clippy
       
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -46,13 +47,19 @@ jobs:
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
       
       - name: Run tests
-        run: cargo test --verbose
+        run: |
+          source ~/.cargo/env
+          cargo test --verbose
       
       - name: Check formatting
-        run: cargo fmt -- --check
+        run: |
+          source ~/.cargo/env
+          cargo fmt -- --check
       
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: |
+          source ~/.cargo/env
+          cargo clippy -- -D warnings
 
   build:
     name: Build WASM
@@ -61,15 +68,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+      - name: Install Rust 1.84
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.84.0
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
-      - name: Add wasm32v1-none target
-        run: rustup target add wasm32v1-none
+      - name: Verify Rust version and add target
+        run: |
+          source ~/.cargo/env
+          rustc --version
+          rustup target add wasm32v1-none
       
       - name: Install system dependencies
         run: |
@@ -78,22 +86,26 @@ jobs:
       
       - name: Install Soroban CLI
         run: |
+          source ~/.cargo/env
           cargo install soroban-cli
       
       - name: Build asset_factory
         run: |
+          source ~/.cargo/env
           cargo build --package asset_factory --target wasm32v1-none --release
           soroban contract optimize \
             --wasm target/wasm32v1-none/release/asset_factory.wasm
       
       - name: Build rwa_token
         run: |
+          source ~/.cargo/env
           cargo build --package rwa_token --target wasm32v1-none --release
           soroban contract optimize \
             --wasm target/wasm32v1-none/release/rwa_token.wasm
       
       - name: Build marketplace_escrow
         run: |
+          source ~/.cargo/env
           cargo build --package marketplace_escrow --target wasm32v1-none --release
           soroban contract optimize \
             --wasm target/wasm32v1-none/release/marketplace_escrow.wasm
