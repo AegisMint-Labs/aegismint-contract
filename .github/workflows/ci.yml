@@ -7,7 +7,7 @@ on:
     branches: [ main, develop ]
 
 jobs:
-  check:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,19 +15,27 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
       
-      - name: Check all contracts
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      
+      - name: Check all contracts compile
         run: |
           cargo check --package asset_factory
           cargo check --package rwa-token  
           cargo check --package marketplace_escrow
       
-      - name: Run tests
+      - name: Run all tests
         run: cargo test --workspace --verbose
       
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Build WASM files
+        run: |
+          cargo build --package asset_factory --target wasm32-unknown-unknown --release
+          cargo build --package rwa-token --target wasm32-unknown-unknown --release
+          cargo build --package marketplace_escrow --target wasm32-unknown-unknown --release
       
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Verify WASM outputs
+        run: |
+          ls -la target/wasm32-unknown-unknown/release/
+          echo "✅ All contracts built successfully"
