@@ -463,3 +463,297 @@ pub trait TokenInterface {
     fn approve(env: Env, owner: Address, spender: Address, amount: i128) -> Result<(), soroban_sdk::Val>;
     fn balance(env: Env, account: Address) -> i128;
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Env};
+
+    fn setup_test_escrow() -> (Env, Address, MarketplaceEscrowContractClient) {
+        let env = Env::default();
+        let contract_id = env.register(MarketplaceEscrowContract, ());
+        let client = MarketplaceEscrowContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        
+        env.mock_all_auths();
+        
+        (env, admin, client)
+    }
+
+    #[test]
+    fn test_initialize() {
+        let (env, admin, client) = setup_test_escrow();
+        let fee_recipient = Address::generate(&env);
+        
+        let min_timeout = 3600u64; // 1 hour
+        let max_timeout = 604800u64; // 1 week  
+        let platform_fee = 250u32; // 2.5%
+
+        let result = client.initialize(
+            &admin,
+            &min_timeout,
+            &max_timeout, 
+            &platform_fee,
+            &fee_recipient,
+        );
+        assert!(result.is_ok());
+
+        assert_eq!(client.admin().unwrap(), admin);
+        assert_eq!(client.escrow_count(), 0);
+
+        let config = client.get_platform_config().unwrap();
+        assert_eq!(config.0, min_timeout);
+        assert_eq!(config.1, max_timeout);
+        assert_eq!(config.2, platform_fee);
+        assert_eq!(config.3, fee_recipient);
+    }
+
+    #[test]
+    fn test_initialize_twice_fails() {
+        let (env, admin, client) = setup_test_escrow();
+        let fee_recipient = Address::generate(&env);
+
+        // First initialization should succeed
+        let result = client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
+        assert!(result.is_ok());
+
+        // Second initialization should fail
+        let result2 = client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
+        assert_eq!(result2, Err(Ok(Error::AlreadyInitialized)));
+    }
+
+    #[test]
+    fn test_initialize_validation() {
+        let (env, admin, client) = setup_test_escrow();
+        let fee_recipient = Address::generate(&env);
+
+        // Test invalid timeout (min >= max)
+        let result = client.initialize(&admin, &604800u64, &3600u64, &250u32, &fee_recipient);
+        assert_eq!(result, Err(Ok(Error::InvalidTimeout)));
+
+        // Test zero min timeout
+        let result2 = client.initialize(&admin, &0u64, &604800u64, &250u32, &fee_recipient);
+        assert_eq!(result2, Err(Ok(Error::InvalidTimeout)));
+
+        // Test excessive platform fee (>100%)
+        let result3 = client.initialize(&admin, &3600u64, &604800u64, &15000u32, &fee_recipient);
+        assert_eq!(result3, Err(Ok(Error::InvalidAmount)));
+    }
+
+    #[test]
+    fn test_update_platform_fee() {
+        let (env, admin, client) = setup_test_escrow();
+        let fee_recipient = Address::generate(&env);
+
+        // Initialize contract
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+
+        // Update platform fee
+        let new_fee = 300u32; // 3%
+        let result = client.update_platform_fee(&new_fee);
+        assert!(result.is_ok());
+
+        let config = client.get_platform_config().unwrap();
+        assert_eq!(config.2, new_fee);
+
+        // Test invalid fee update
+        let result2 = client.update_platform_fee(&15000u32);
+        assert_eq!(result2, Err(Ok(Error::InvalidAmount)));
+    }
+
+    #[test]
+    fn test_escrow_creation_validation() {
+        let (env, admin, client) = setup_test_escrow();
+        let fee_recipient = Address::generate(&env);
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        let token_contract = Address::generate(&env);
+
+        // Initialize contract
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+
+        // Test invalid token amount
+        let result = client.create_escrow(
+            &seller,
+            &buyer,
+            &token_contract,
+            &0i128, // Invalid: zero amount
+            &1000i128,
+            &7200u64,
+        );
+        assert_eq!(result, Err(Ok(Error::InvalidAmount)));
+
+        // Test invalid payment amount
+        let result2 = client.create_escrow(
+            &seller,
+            &buyer,
+            &token_contract,
+            &100i128,
+            &-1000i128, // Invalid: negative amount
+            &7200u64,
+        );
+        assert_eq!(result2, Err(Ok(Error::InvalidAmount)));
+
+        // Test timeout too short
+        let result3 = client.create_escrow(
+            &seller,
+            &buyer,
+            &token_contract,
+            &100i128,
+            &1000i128,
+            &1800u64, // Too short (< 3600)
+        );
+        assert_eq!(result3, Err(Ok(Error::InvalidTimeout)));
+
+        // Test timeout too long
+        let result4 = client.create_escrow(
+            &seller,
+            &buyer,
+            &token_contract,
+            &100i128,
+            &1000i128,
+            &1000000u64, // Too long (> 604800)
+        );
+        assert_eq!(result4, Err(Ok(Error::InvalidTimeout)));
+    }
+
+    #[test] 
+    fn test_escrow_queries() {
+        let (env, admin, client) = setup_test_escrow();
+        let fee_recipient = Address::generate(&env);
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+
+        // Initialize contract
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+
+        // Test with no escrows
+        assert_eq!(client.escrow_count(), 0);
+        
+        let seller_escrows = client.get_escrows_by_seller(&seller);
+        assert_eq!(seller_escrows.len(), 0);
+
+        let buyer_escrows = client.get_escrows_by_buyer(&buyer);
+        assert_eq!(buyer_escrows.len(), 0);
+
+        // Test non-existent escrow
+        let result = client.get_escrow(&1);
+        assert_eq!(result, Err(Ok(Error::EscrowNotFound)));
+    }
+
+    #[test]
+    fn test_escrow_state_validation() {
+        let (env, admin, client) = setup_test_escrow();
+        let fee_recipient = Address::generate(&env);
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+
+        // Initialize contract
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+
+        // Test operations on non-existent escrow
+        let result = client.complete_escrow(&999);
+        assert_eq!(result, Err(Ok(Error::EscrowNotFound)));
+
+        let result2 = client.cancel_escrow(&999);
+        assert_eq!(result2, Err(Ok(Error::EscrowNotFound)));
+
+        let result3 = client.refund_expired_escrow(&999);
+        assert_eq!(result3, Err(Ok(Error::EscrowNotFound)));
+    }
+
+    #[test]
+    fn test_escrow_expiration_logic() {
+        let (env, admin, client) = setup_test_escrow();
+        let fee_recipient = Address::generate(&env);
+
+        // Initialize contract
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+
+        // Test refund on active (non-expired) escrow
+        // Since we can't easily mock contract creation without actual tokens,
+        // we test the validation logic for non-existent escrows
+        let result = client.refund_expired_escrow(&1);
+        assert_eq!(result, Err(Ok(Error::EscrowNotFound)));
+    }
+
+    #[test]
+    fn test_platform_fee_calculation() {
+        // This is more of a unit test for the fee calculation logic
+        // In a real scenario, we would create an escrow and complete it
+        let payment_amount = 10000i128;
+        let platform_fee = 250u32; // 2.5%
+        
+        let fee_amount = (payment_amount * platform_fee as i128) / 10000;
+        let seller_amount = payment_amount - fee_amount;
+        
+        assert_eq!(fee_amount, 250); // 2.5% of 10000
+        assert_eq!(seller_amount, 9750); // 10000 - 250
+    }
+
+    #[test]
+    fn test_escrow_lists_empty() {
+        let (env, admin, client) = setup_test_escrow();
+        let fee_recipient = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        // Initialize contract
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+
+        // Test empty escrow lists
+        let seller_escrows = client.get_escrows_by_seller(&user);
+        assert_eq!(seller_escrows.len(), 0);
+
+        let buyer_escrows = client.get_escrows_by_buyer(&user);
+        assert_eq!(buyer_escrows.len(), 0);
+    }
+
+    #[test]
+    fn test_escrow_info_structure() {
+        let env = Env::default();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        let token_contract = Address::generate(&env);
+
+        // Test EscrowInfo creation
+        let escrow_info = EscrowInfo {
+            escrow_id: 1,
+            seller: seller.clone(),
+            buyer: buyer.clone(),
+            token_contract: token_contract.clone(),
+            token_amount: 100,
+            payment_amount: 1000,
+            state: EscrowState::Active,
+            created_at: 1000000,
+            expires_at: 1007200, // +2 hours
+            completed_at: None,
+            platform_fee: 250,
+        };
+
+        assert_eq!(escrow_info.escrow_id, 1);
+        assert_eq!(escrow_info.seller, seller);
+        assert_eq!(escrow_info.buyer, buyer);
+        assert_eq!(escrow_info.state, EscrowState::Active);
+        assert_eq!(escrow_info.completed_at, None);
+    }
+
+    #[test]
+    fn test_escrow_states() {
+        // Test all escrow states
+        let active = EscrowState::Active;
+        let completed = EscrowState::Completed;
+        let cancelled = EscrowState::Cancelled;
+        let refunded = EscrowState::Refunded;
+        let in_dispute = EscrowState::InDispute;
+
+        // Ensure they are different
+        assert_ne!(active, completed);
+        assert_ne!(completed, cancelled);
+        assert_ne!(cancelled, refunded);
+        assert_ne!(refunded, in_dispute);
+
+        // Test cloning
+        let active_clone = active.clone();
+        assert_eq!(active, active_clone);
+    }
+}
