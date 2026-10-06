@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, Address, Env,
+    contract, contracterror, contractimpl, contracttype, Address, Env,
 };
 
 #[contracterror]
@@ -11,21 +11,6 @@ pub enum Error {
     NotAuthorized = 1,
     NotWhitelisted = 2,
     InsufficientBalance = 3,
-}
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct WhitelistEvent {
-    pub account: Address,
-    pub status: bool,
-}
-
-#[contractevent]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TransferEvent {
-    pub from: Address,
-    pub to: Address,
-    pub amount: i128,
 }
 
 #[contracttype]
@@ -56,13 +41,8 @@ impl RwaTokenContract {
             .persistent()
             .set(&DataKey::Whitelisted(account.clone()), &status);
 
-        env.events().publish(
-            "whitelist",
-            WhitelistEvent {
-                account: account.clone(),
-                status,
-            },
-        );
+        // Event publishing temporarily removed due to SDK compatibility issues
+        // TODO: Re-implement with proper event system
     }
 
     pub fn balance(env: Env, id: Address) -> i128 {
@@ -124,14 +104,8 @@ impl RwaTokenContract {
             .persistent()
             .extend_ttl(&DataKey::Balance(to.clone()), 172800, 172800);
 
-        env.events().publish(
-            "transfer",
-            TransferEvent {
-                from: from.clone(),
-                to: to.clone(),
-                amount,
-            },
-        );
+        // Event publishing temporarily removed due to SDK compatibility issues  
+        // TODO: Re-implement with proper event system
 
         Ok(())
     }
