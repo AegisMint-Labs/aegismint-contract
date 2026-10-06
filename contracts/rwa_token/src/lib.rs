@@ -1,6 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env,
+};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -35,12 +37,12 @@ impl RwaTokenContract {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         admin.require_auth();
 
-        env.storage().persistent().set(&DataKey::Whitelisted(account.clone()), &status);
-        
-        env.events().publish(
-            (symbol_short!("whitelist"), account.clone()),
-            status,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::Whitelisted(account.clone()), &status);
+
+        env.events()
+            .publish((symbol_short!("whitelist"), account.clone()), status);
     }
 
     pub fn balance(env: Env, id: Address) -> i128 {
@@ -57,26 +59,50 @@ impl RwaTokenContract {
             return Err(Error::InsufficientBalance);
         }
 
-        let from_whitelisted: bool = env.storage().persistent().get(&DataKey::Whitelisted(from.clone())).unwrap_or(false);
-        let to_whitelisted: bool = env.storage().persistent().get(&DataKey::Whitelisted(to.clone())).unwrap_or(false);
+        let from_whitelisted: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Whitelisted(from.clone()))
+            .unwrap_or(false);
+        let to_whitelisted: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Whitelisted(to.clone()))
+            .unwrap_or(false);
 
         if !from_whitelisted || !to_whitelisted {
             return Err(Error::NotWhitelisted);
         }
 
-        let from_balance: i128 = env.storage().persistent().get(&DataKey::Balance(from.clone())).unwrap_or(0);
+        let from_balance: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Balance(from.clone()))
+            .unwrap_or(0);
         if from_balance < amount {
             return Err(Error::InsufficientBalance);
         }
 
-        let to_balance: i128 = env.storage().persistent().get(&DataKey::Balance(to.clone())).unwrap_or(0);
+        let to_balance: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Balance(to.clone()))
+            .unwrap_or(0);
 
-        env.storage().persistent().set(&DataKey::Balance(from.clone()), &(from_balance - amount));
-        env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_balance + amount));
+        env.storage()
+            .persistent()
+            .set(&DataKey::Balance(from.clone()), &(from_balance - amount));
+        env.storage()
+            .persistent()
+            .set(&DataKey::Balance(to.clone()), &(to_balance + amount));
 
         // Extend TTL on persistent storage
-        env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), 172800, 172800);
-        env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), 172800, 172800);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Balance(from.clone()), 172800, 172800);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Balance(to.clone()), 172800, 172800);
 
         env.events().publish(
             (symbol_short!("transfer"), from.clone(), to.clone()),
@@ -99,11 +125,11 @@ mod test {
         let client = RwaTokenContractClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
-        
+
         env.mock_all_auths();
         client.initialize(&admin);
 
-        // Contract is now initialized - we can verify by checking that 
+        // Contract is now initialized - we can verify by checking that
         // calling initialize again would panic (but we can't test that in no_std)
     }
 
@@ -118,9 +144,9 @@ mod test {
         let user2 = Address::generate(&env);
 
         env.mock_all_auths();
-        
+
         client.initialize(&admin);
-        
+
         // Whitelist users
         client.set_whitelist(&user1, &true);
         client.set_whitelist(&user2, &true);
@@ -141,7 +167,7 @@ mod test {
         let user2 = Address::generate(&env);
 
         env.mock_all_auths();
-        
+
         client.initialize(&admin);
 
         // Try to transfer without whitelisting (should fail)
