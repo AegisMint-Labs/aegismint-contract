@@ -47,7 +47,9 @@ impl MarketplaceEscrow {
 
         admin.require_auth();
         env.storage().instance().set(&StorageKey::Admin, &admin);
-        env.storage().instance().set(&StorageKey::EscrowCount, &0u64);
+        env.storage()
+            .instance()
+            .set(&StorageKey::EscrowCount, &0u64);
     }
 
     /// Create a new escrow
@@ -250,7 +252,7 @@ mod test {
         let client = MarketplaceEscrowClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
-        
+
         env.mock_all_auths();
         client.initialize(&admin);
 

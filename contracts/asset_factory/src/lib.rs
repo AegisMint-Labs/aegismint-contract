@@ -34,7 +34,7 @@ impl AssetFactory {
         if env.storage().instance().has(&StorageKey::Admin) {
             panic!("Contract already initialized");
         }
-        
+
         admin.require_auth();
         env.storage().instance().set(&StorageKey::Admin, &admin);
         env.storage().instance().set(&StorageKey::AssetCount, &0u64);
@@ -134,7 +134,7 @@ mod test {
         let client = AssetFactoryClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
-        
+
         env.mock_all_auths();
         client.initialize(&admin);
 
