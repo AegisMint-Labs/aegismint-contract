@@ -68,7 +68,7 @@ jobs:
       
       - name: Install Soroban CLI
         run: |
-          cargo install --locked soroban-cli --features opt
+          cargo install soroban-cli
       
       - name: Build asset_factory
         run: |
