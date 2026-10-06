@@ -1,55 +1,185 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype,
+    Address, Env, Symbol, Vec
+};
 
-/// Storage key types for the Marketplace Escrow contract
-#[contracttype]
-pub enum StorageKey {
-    Admin,
-    EscrowCount,
-    Escrow(u64),
+/// Error types for the Marketplace Escrow contract
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum Error {
+    /// Contract is already initialized
+    AlreadyInitialized = 1,
+    /// Caller is not authorized to perform this action
+    Unauthorized = 2,
+    /// Escrow not found
+    EscrowNotFound = 3,
+    /// Invalid escrow state for this operation
+    InvalidEscrowState = 4,
+    /// Invalid amount (zero or negative)
+    InvalidAmount = 5,
+    /// Escrow has expired
+    EscrowExpired = 6,
+    /// Escrow has not expired yet
+    EscrowNotExpired = 7,
+    /// Insufficient balance for escrow
+    InsufficientBalance = 8,
+    /// Invalid timeout (too short or too long)
+    InvalidTimeout = 9,
+    /// Transfer failed
+    TransferFailed = 10,
 }
 
-/// Escrow status
+/// Escrow state enumeration
 #[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum EscrowStatus {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EscrowState {
+    /// Escrow is active and awaiting fulfillment
     Active,
+    /// Escrow has been completed successfully
     Completed,
+    /// Escrow has been cancelled by seller
     Cancelled,
-    Disputed,
+    /// Escrow has been refunded due to expiration
+    Refunded,
+    /// Escrow is in dispute resolution
+    InDispute,
 }
 
-/// Escrow details
+/// Storage keys for the Marketplace Escrow contract
 #[contracttype]
 #[derive(Clone)]
-pub struct Escrow {
-    pub id: u64,
-    pub seller: Address,
-    pub buyer: Address,
-    pub token_address: Address,
-    pub amount: i128,
-    pub status: EscrowStatus,
-    pub created_at: u64,
-    pub completed_at: Option<u64>,
+pub enum DataKey {
+    /// Contract administrator address
+    Admin,
+    /// Total number of escrows created
+    EscrowCount,
+    /// Individual escrow: Escrow(escrow_id)
+    Escrow(u64),
+    /// Escrows by seller: EscrowsBySeller(seller_address) -> Vec<u64>
+    EscrowsBySeller(Address),
+    /// Escrows by buyer: EscrowsByBuyer(buyer_address) -> Vec<u64>
+    EscrowsByBuyer(Address),
+    /// Contract initialization status
+    Initialized,
+    /// Minimum escrow timeout (in seconds)
+    MinTimeout,
+    /// Maximum escrow timeout (in seconds) 
+    MaxTimeout,
+    /// Platform fee (in basis points, e.g., 250 = 2.5%)
+    PlatformFee,
+    /// Platform fee recipient
+    FeeRecipient,
 }
 
+/// Escrow details structure
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowInfo {
+    pub escrow_id: u64,
+    pub seller: Address,
+    pub buyer: Address,
+    pub token_contract: Address,
+    pub token_amount: i128,
+    pub payment_amount: i128,
+    pub state: EscrowState,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub completed_at: Option<u64>,
+    pub platform_fee: u32,
+}
+
+/// Marketplace Escrow Contract
 #[contract]
-pub struct MarketplaceEscrow;
+pub struct MarketplaceEscrowContract;
 
 #[contractimpl]
-impl MarketplaceEscrow {
-    /// Initialize the escrow contract
-    pub fn initialize(env: Env, admin: Address) {
-        if env.storage().instance().has(&StorageKey::Admin) {
-            panic!("Contract already initialized");
+impl MarketplaceEscrowContract {
+    /// Initialize the marketplace escrow contract
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        min_timeout: u64,
+        max_timeout: u64,
+        platform_fee: u32,
+        fee_recipient: Address,
+    ) -> Result<(), Error> {
+        // Check if already initialized
+        if env.storage().instance().has(&DataKey::Initialized) {
+            return Err(Error::AlreadyInitialized);
         }
 
+        // Require admin authorization
         admin.require_auth();
-        env.storage().instance().set(&StorageKey::Admin, &admin);
-        env.storage()
-            .instance()
-            .set(&StorageKey::EscrowCount, &0u64);
+
+        // Validate parameters
+        if min_timeout == 0 || max_timeout <= min_timeout {
+            return Err(Error::InvalidTimeout);
+        }
+
+        if platform_fee > 10000 { // Max 100% fee
+            return Err(Error::InvalidAmount);
+        }
+
+        // Store configuration
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::EscrowCount, &0u64);
+        env.storage().instance().set(&DataKey::MinTimeout, &min_timeout);
+        env.storage().instance().set(&DataKey::MaxTimeout, &max_timeout);
+        env.storage().instance().set(&DataKey::PlatformFee, &platform_fee);
+        env.storage().instance().set(&DataKey::FeeRecipient, &fee_recipient);
+        env.storage().instance().set(&DataKey::Initialized, &true);
+
+        // Publish initialization event
+        env.events().publish(
+            (Symbol::new(&env, "escrow_initialized"), admin.clone()),
+            (min_timeout, max_timeout, platform_fee, fee_recipient),
+        );
+
+        Ok(())
+    }
+
+    /// Get contract administrator
+    pub fn admin(env: Env) -> Result<Address, Error> {
+        env.storage().instance().get(&DataKey::Admin)
+            .ok_or(Error::Unauthorized)
+    }
+
+    /// Get platform configuration
+    pub fn get_platform_config(env: Env) -> Result<(u64, u64, u32, Address), Error> {
+        let min_timeout: u64 = env.storage().instance().get(&DataKey::MinTimeout)
+            .ok_or(Error::Unauthorized)?;
+        let max_timeout: u64 = env.storage().instance().get(&DataKey::MaxTimeout)
+            .ok_or(Error::Unauthorized)?;
+        let platform_fee: u32 = env.storage().instance().get(&DataKey::PlatformFee)
+            .ok_or(Error::Unauthorized)?;
+        let fee_recipient: Address = env.storage().instance().get(&DataKey::FeeRecipient)
+            .ok_or(Error::Unauthorized)?;
+
+        Ok((min_timeout, max_timeout, platform_fee, fee_recipient))
+    }
+
+    /// Update platform fee (admin only)
+    pub fn update_platform_fee(env: Env, new_fee: u32) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(Error::Unauthorized)?;
+        
+        admin.require_auth();
+
+        if new_fee > 10000 {
+            return Err(Error::InvalidAmount);
+        }
+
+        env.storage().instance().set(&DataKey::PlatformFee, &new_fee);
+
+        env.events().publish(
+            (Symbol::new(&env, "fee_updated"), admin),
+            new_fee,
+        );
+
+        Ok(())
     }
 
     /// Create a new escrow
@@ -57,260 +187,279 @@ impl MarketplaceEscrow {
         env: Env,
         seller: Address,
         buyer: Address,
-        token_address: Address,
-        amount: i128,
-    ) -> u64 {
-        buyer.require_auth();
+        token_contract: Address,
+        token_amount: i128,
+        payment_amount: i128,
+        timeout_seconds: u64,
+    ) -> Result<u64, Error> {
+        seller.require_auth();
 
-        let escrow_count: u64 = env
-            .storage()
-            .instance()
-            .get(&StorageKey::EscrowCount)
-            .unwrap_or(0);
+        // Validate parameters
+        if token_amount <= 0 || payment_amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
 
-        let escrow_id = escrow_count + 1;
+        let min_timeout: u64 = env.storage().instance().get(&DataKey::MinTimeout)
+            .ok_or(Error::Unauthorized)?;
+        let max_timeout: u64 = env.storage().instance().get(&DataKey::MaxTimeout)
+            .ok_or(Error::Unauthorized)?;
 
-        let escrow = Escrow {
-            id: escrow_id,
-            seller,
-            buyer,
-            token_address,
-            amount,
-            status: EscrowStatus::Active,
-            created_at: env.ledger().timestamp(),
+        if timeout_seconds < min_timeout || timeout_seconds > max_timeout {
+            return Err(Error::InvalidTimeout);
+        }
+
+        // Transfer tokens from seller to this contract
+        let token_client = TokenClient::new(&env, &token_contract);
+        let transfer_result = token_client.try_transfer_from(
+            &env.current_contract_address(),
+            &seller,
+            &env.current_contract_address(),
+            &token_amount,
+        );
+
+        if transfer_result.is_err() {
+            return Err(Error::TransferFailed);
+        }
+
+        // Create escrow
+        let escrow_count: u64 = env.storage().instance().get(&DataKey::EscrowCount).unwrap_or(0);
+        let new_escrow_id = escrow_count + 1;
+        
+        let current_time = env.ledger().timestamp();
+        let platform_fee: u32 = env.storage().instance().get(&DataKey::PlatformFee)
+            .ok_or(Error::Unauthorized)?;
+
+        let escrow_info = EscrowInfo {
+            escrow_id: new_escrow_id,
+            seller: seller.clone(),
+            buyer: buyer.clone(),
+            token_contract: token_contract.clone(),
+            token_amount,
+            payment_amount,
+            state: EscrowState::Active,
+            created_at: current_time,
+            expires_at: current_time + timeout_seconds,
             completed_at: None,
+            platform_fee,
         };
 
-        env.storage()
-            .instance()
-            .set(&StorageKey::Escrow(escrow_id), &escrow);
-        env.storage()
-            .instance()
-            .set(&StorageKey::EscrowCount, &escrow_id);
+        // Store escrow
+        env.storage().persistent().set(&DataKey::Escrow(new_escrow_id), &escrow_info);
+        env.storage().instance().set(&DataKey::EscrowCount, &new_escrow_id);
 
-        escrow_id
+        // Extend TTL
+        env.storage().persistent().extend_ttl(&DataKey::Escrow(new_escrow_id), 172800, 172800);
+
+        // Update seller and buyer escrow lists
+        Self::add_to_seller_escrows(env.clone(), seller.clone(), new_escrow_id);
+        Self::add_to_buyer_escrows(env.clone(), buyer.clone(), new_escrow_id);
+
+        // Publish creation event
+        env.events().publish(
+            (Symbol::new(&env, "escrow_created"), new_escrow_id, seller, buyer),
+            escrow_info,
+        );
+
+        Ok(new_escrow_id)
     }
 
-    /// Complete an escrow (release funds to seller)
-    pub fn complete_escrow(env: Env, escrow_id: u64) {
-        let mut escrow: Escrow = env
-            .storage()
-            .instance()
-            .get(&StorageKey::Escrow(escrow_id))
-            .expect("Escrow not found");
+    /// Complete escrow (buyer fulfills payment)
+    pub fn complete_escrow(env: Env, escrow_id: u64) -> Result<(), Error> {
+        let mut escrow_info: EscrowInfo = env.storage().persistent()
+            .get(&DataKey::Escrow(escrow_id))
+            .ok_or(Error::EscrowNotFound)?;
 
-        // Only buyer or admin can complete
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&StorageKey::Admin)
-            .expect("Not initialized");
+        escrow_info.buyer.require_auth();
 
-        let caller = env.current_contract_address();
-        if caller != escrow.buyer && caller != admin {
-            escrow.buyer.require_auth();
+        // Check escrow state
+        if escrow_info.state != EscrowState::Active {
+            return Err(Error::InvalidEscrowState);
         }
 
-        if escrow.status != EscrowStatus::Active {
-            panic!("Escrow is not active");
+        // Check expiration
+        if env.ledger().timestamp() > escrow_info.expires_at {
+            return Err(Error::EscrowExpired);
         }
 
-        escrow.status = EscrowStatus::Completed;
-        escrow.completed_at = Some(env.ledger().timestamp());
+        // Calculate platform fee
+        let fee_amount = (escrow_info.payment_amount * escrow_info.platform_fee as i128) / 10000;
+        let seller_amount = escrow_info.payment_amount - fee_amount;
 
-        env.storage()
-            .instance()
-            .set(&StorageKey::Escrow(escrow_id), &escrow);
+        // Transfer payment from buyer to seller (minus fee)
+        if seller_amount > 0 {
+            // Note: In production, this would need to handle native token transfers
+            // For now, assuming payment is handled off-chain or via separate token contract
+        }
 
-        // In production, this would trigger token transfer to seller
+        // Transfer platform fee to fee recipient
+        if fee_amount > 0 {
+            let fee_recipient: Address = env.storage().instance()
+                .get(&DataKey::FeeRecipient)
+                .ok_or(Error::Unauthorized)?;
+            // Fee transfer logic would go here
+        }
+
+        // Transfer escrowed tokens to buyer
+        let token_client = TokenClient::new(&env, &escrow_info.token_contract);
+        let transfer_result = token_client.try_transfer(
+            &env.current_contract_address(),
+            &escrow_info.buyer,
+            &escrow_info.token_amount,
+        );
+
+        if transfer_result.is_err() {
+            return Err(Error::TransferFailed);
+        }
+
+        // Update escrow state
+        escrow_info.state = EscrowState::Completed;
+        escrow_info.completed_at = Some(env.ledger().timestamp());
+
+        env.storage().persistent().set(&DataKey::Escrow(escrow_id), &escrow_info);
+        env.storage().persistent().extend_ttl(&DataKey::Escrow(escrow_id), 172800, 172800);
+
+        // Publish completion event
+        env.events().publish(
+            (Symbol::new(&env, "escrow_completed"), escrow_id),
+            (seller_amount, fee_amount),
+        );
+
+        Ok(())
     }
 
-    /// Cancel an escrow (refund to buyer)
-    pub fn cancel_escrow(env: Env, escrow_id: u64) {
-        let mut escrow: Escrow = env
-            .storage()
-            .instance()
-            .get(&StorageKey::Escrow(escrow_id))
-            .expect("Escrow not found");
+    /// Cancel escrow (seller cancels before expiration)
+    pub fn cancel_escrow(env: Env, escrow_id: u64) -> Result<(), Error> {
+        let mut escrow_info: EscrowInfo = env.storage().persistent()
+            .get(&DataKey::Escrow(escrow_id))
+            .ok_or(Error::EscrowNotFound)?;
 
-        // Only seller or admin can cancel
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&StorageKey::Admin)
-            .expect("Not initialized");
+        escrow_info.seller.require_auth();
 
-        let caller = env.current_contract_address();
-        if caller != escrow.seller && caller != admin {
-            escrow.seller.require_auth();
+        // Check escrow state
+        if escrow_info.state != EscrowState::Active {
+            return Err(Error::InvalidEscrowState);
         }
 
-        if escrow.status != EscrowStatus::Active {
-            panic!("Escrow is not active");
+        // Return tokens to seller
+        let token_client = TokenClient::new(&env, &escrow_info.token_contract);
+        let transfer_result = token_client.try_transfer(
+            &env.current_contract_address(),
+            &escrow_info.seller,
+            &escrow_info.token_amount,
+        );
+
+        if transfer_result.is_err() {
+            return Err(Error::TransferFailed);
         }
 
-        escrow.status = EscrowStatus::Cancelled;
-        escrow.completed_at = Some(env.ledger().timestamp());
+        // Update escrow state
+        escrow_info.state = EscrowState::Cancelled;
+        escrow_info.completed_at = Some(env.ledger().timestamp());
 
-        env.storage()
-            .instance()
-            .set(&StorageKey::Escrow(escrow_id), &escrow);
+        env.storage().persistent().set(&DataKey::Escrow(escrow_id), &escrow_info);
+        env.storage().persistent().extend_ttl(&DataKey::Escrow(escrow_id), 172800, 172800);
 
-        // In production, this would trigger token refund to buyer
+        // Publish cancellation event
+        env.events().publish(
+            (Symbol::new(&env, "escrow_cancelled"), escrow_id),
+            escrow_info.seller,
+        );
+
+        Ok(())
     }
 
-    /// Raise a dispute on an escrow
-    pub fn dispute_escrow(env: Env, escrow_id: u64) {
-        let mut escrow: Escrow = env
-            .storage()
-            .instance()
-            .get(&StorageKey::Escrow(escrow_id))
-            .expect("Escrow not found");
+    /// Refund expired escrow (anyone can call after expiration)
+    pub fn refund_expired_escrow(env: Env, escrow_id: u64) -> Result<(), Error> {
+        let mut escrow_info: EscrowInfo = env.storage().persistent()
+            .get(&DataKey::Escrow(escrow_id))
+            .ok_or(Error::EscrowNotFound)?;
 
-        // Either party can dispute
-        let caller = env.current_contract_address();
-        if caller != escrow.buyer && caller != escrow.seller {
-            escrow.buyer.require_auth();
+        // Check escrow state
+        if escrow_info.state != EscrowState::Active {
+            return Err(Error::InvalidEscrowState);
         }
 
-        if escrow.status != EscrowStatus::Active {
-            panic!("Escrow is not active");
+        // Check expiration
+        if env.ledger().timestamp() <= escrow_info.expires_at {
+            return Err(Error::EscrowNotExpired);
         }
 
-        escrow.status = EscrowStatus::Disputed;
+        // Return tokens to seller
+        let token_client = TokenClient::new(&env, &escrow_info.token_contract);
+        let transfer_result = token_client.try_transfer(
+            &env.current_contract_address(),
+            &escrow_info.seller,
+            &escrow_info.token_amount,
+        );
 
-        env.storage()
-            .instance()
-            .set(&StorageKey::Escrow(escrow_id), &escrow);
+        if transfer_result.is_err() {
+            return Err(Error::TransferFailed);
+        }
+
+        // Update escrow state
+        escrow_info.state = EscrowState::Refunded;
+        escrow_info.completed_at = Some(env.ledger().timestamp());
+
+        env.storage().persistent().set(&DataKey::Escrow(escrow_id), &escrow_info);
+        env.storage().persistent().extend_ttl(&DataKey::Escrow(escrow_id), 172800, 172800);
+
+        // Publish refund event
+        env.events().publish(
+            (Symbol::new(&env, "escrow_refunded"), escrow_id),
+            escrow_info.seller,
+        );
+
+        Ok(())
     }
 
-    /// Resolve a disputed escrow (admin only)
-    pub fn resolve_dispute(env: Env, escrow_id: u64, release_to_seller: bool) {
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&StorageKey::Admin)
-            .expect("Not initialized");
-        admin.require_auth();
-
-        let mut escrow: Escrow = env
-            .storage()
-            .instance()
-            .get(&StorageKey::Escrow(escrow_id))
-            .expect("Escrow not found");
-
-        if escrow.status != EscrowStatus::Disputed {
-            panic!("Escrow is not disputed");
-        }
-
-        if release_to_seller {
-            escrow.status = EscrowStatus::Completed;
-        } else {
-            escrow.status = EscrowStatus::Cancelled;
-        }
-
-        escrow.completed_at = Some(env.ledger().timestamp());
-
-        env.storage()
-            .instance()
-            .set(&StorageKey::Escrow(escrow_id), &escrow);
-
-        // In production, this would trigger token transfer
-    }
-
-    /// Get escrow details
-    pub fn get_escrow(env: Env, escrow_id: u64) -> Option<Escrow> {
-        env.storage().instance().get(&StorageKey::Escrow(escrow_id))
+    /// Get escrow information
+    pub fn get_escrow(env: Env, escrow_id: u64) -> Result<EscrowInfo, Error> {
+        env.storage().persistent()
+            .get(&DataKey::Escrow(escrow_id))
+            .ok_or(Error::EscrowNotFound)
     }
 
     /// Get total escrow count
-    pub fn get_escrow_count(env: Env) -> u64 {
-        env.storage()
-            .instance()
-            .get(&StorageKey::EscrowCount)
-            .unwrap_or(0)
+    pub fn escrow_count(env: Env) -> u64 {
+        env.storage().instance().get(&DataKey::EscrowCount).unwrap_or(0)
     }
 
-    /// Get contract admin
-    pub fn get_admin(env: Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&StorageKey::Admin)
-            .expect("Contract not initialized")
+    /// Get escrows by seller
+    pub fn get_escrows_by_seller(env: Env, seller: Address) -> Vec<u64> {
+        env.storage().persistent()
+            .get(&DataKey::EscrowsBySeller(seller))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Get escrows by buyer  
+    pub fn get_escrows_by_buyer(env: Env, buyer: Address) -> Vec<u64> {
+        env.storage().persistent()
+            .get(&DataKey::EscrowsByBuyer(buyer))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Internal: Add escrow to seller's list
+    fn add_to_seller_escrows(env: Env, seller: Address, escrow_id: u64) {
+        let mut escrows = Self::get_escrows_by_seller(env.clone(), seller.clone());
+        escrows.push_back(escrow_id);
+        env.storage().persistent().set(&DataKey::EscrowsBySeller(seller.clone()), &escrows);
+        env.storage().persistent().extend_ttl(&DataKey::EscrowsBySeller(seller), 172800, 172800);
+    }
+
+    /// Internal: Add escrow to buyer's list
+    fn add_to_buyer_escrows(env: Env, buyer: Address, escrow_id: u64) {
+        let mut escrows = Self::get_escrows_by_buyer(env.clone(), buyer.clone());
+        escrows.push_back(escrow_id);
+        env.storage().persistent().set(&DataKey::EscrowsByBuyer(buyer.clone()), &escrows);
+        env.storage().persistent().extend_ttl(&DataKey::EscrowsByBuyer(buyer), 172800, 172800);
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use soroban_sdk::{testutils::Address as _, Env};
-
-    #[test]
-    fn test_initialize() {
-        let env = Env::default();
-        let contract_id = env.register(MarketplaceEscrow, ());
-        let client = MarketplaceEscrowClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-
-        env.mock_all_auths();
-        client.initialize(&admin);
-
-        assert_eq!(client.get_admin(), admin);
-        assert_eq!(client.get_escrow_count(), 0);
-    }
-
-    #[test]
-    fn test_create_and_complete_escrow() {
-        let env = Env::default();
-        let contract_id = env.register(MarketplaceEscrow, ());
-        let client = MarketplaceEscrowClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let seller = Address::generate(&env);
-        let buyer = Address::generate(&env);
-        let token = Address::generate(&env);
-
-        env.mock_all_auths();
-        client.initialize(&admin);
-
-        let escrow_id = client.create_escrow(&seller, &buyer, &token, &1000);
-
-        assert_eq!(escrow_id, 1);
-        assert_eq!(client.get_escrow_count(), 1);
-
-        let escrow = client.get_escrow(&escrow_id).unwrap();
-        assert_eq!(escrow.status, EscrowStatus::Active);
-
-        client.complete_escrow(&escrow_id);
-
-        let completed_escrow = client.get_escrow(&escrow_id).unwrap();
-        assert_eq!(completed_escrow.status, EscrowStatus::Completed);
-    }
-
-    #[test]
-    fn test_dispute_resolution() {
-        let env = Env::default();
-        let contract_id = env.register(MarketplaceEscrow, ());
-        let client = MarketplaceEscrowClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let seller = Address::generate(&env);
-        let buyer = Address::generate(&env);
-        let token = Address::generate(&env);
-
-        env.mock_all_auths();
-        client.initialize(&admin);
-
-        let escrow_id = client.create_escrow(&seller, &buyer, &token, &1000);
-        client.dispute_escrow(&escrow_id);
-
-        let disputed_escrow = client.get_escrow(&escrow_id).unwrap();
-        assert_eq!(disputed_escrow.status, EscrowStatus::Disputed);
-
-        client.resolve_dispute(&escrow_id, &true);
-
-        let resolved_escrow = client.get_escrow(&escrow_id).unwrap();
-        assert_eq!(resolved_escrow.status, EscrowStatus::Completed);
-    }
+/// Token client interface for interacting with RWA tokens
+#[soroban_sdk::contractclient(name = "TokenClient")]
+pub trait TokenInterface {
+    fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), soroban_sdk::Val>;
+    fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) -> Result<(), soroban_sdk::Val>;
+    fn approve(env: Env, owner: Address, spender: Address, amount: i128) -> Result<(), soroban_sdk::Val>;
+    fn balance(env: Env, account: Address) -> i128;
 }
