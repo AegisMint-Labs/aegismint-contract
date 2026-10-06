@@ -15,10 +15,19 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
       
-      - name: Check asset_factory
-        run: cargo check --package asset_factory
+      - name: Check all contracts
+        run: |
+          cargo check --package asset_factory
+          cargo check --package rwa-token  
+          cargo check --package marketplace_escrow
+      
+      - name: Run tests
+        run: cargo test --workspace --verbose
       
       - name: Check formatting
         run: cargo fmt --all -- --check
+      
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
