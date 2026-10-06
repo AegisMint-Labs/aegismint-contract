@@ -428,3 +428,315 @@ impl RwaTokenContract {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Env};
+
+    fn setup_test_contract() -> (Env, Address, RwaTokenContractClient) {
+        let env = Env::default();
+        let contract_id = env.register(RwaTokenContract, ());
+        let client = RwaTokenContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        
+        env.mock_all_auths();
+        
+        (env, admin, client)
+    }
+
+    #[test]
+    fn test_initialize() {
+        let (env, admin, client) = setup_test_contract();
+        
+        let name = String::from_str(&env, "Real Estate Token");
+        let symbol = String::from_str(&env, "RET");
+        let decimals = 8u32;
+        let total_supply = 1_000_000i128;
+
+        let result = client.initialize(&admin, &name, &symbol, &decimals, &total_supply);
+        assert!(result.is_ok());
+
+        // Verify token info
+        let token_info = client.token_info().unwrap();
+        assert_eq!(token_info.name, name);
+        assert_eq!(token_info.symbol, symbol);
+        assert_eq!(token_info.decimals, decimals);
+        assert_eq!(token_info.total_supply, total_supply);
+        assert_eq!(token_info.admin, admin);
+
+        // Admin should have all tokens and be whitelisted
+        assert_eq!(client.balance(&admin), total_supply);
+        assert!(client.is_whitelisted(&admin));
+    }
+
+    #[test]
+    fn test_initialize_twice_fails() {
+        let (env, admin, client) = setup_test_contract();
+        
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+
+        // First initialization should succeed
+        let result = client.initialize(&admin, &name, &symbol, &8u32, &1000i128);
+        assert!(result.is_ok());
+
+        // Second initialization should fail
+        let result2 = client.initialize(&admin, &name, &symbol, &8u32, &1000i128);
+        assert_eq!(result2, Err(Ok(Error::AlreadyInitialized)));
+    }
+
+    #[test]
+    fn test_whitelist_management() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        client.initialize(&admin, &name, &symbol, &8u32, &1000i128).unwrap();
+
+        // User should not be whitelisted initially
+        assert!(!client.is_whitelisted(&user));
+
+        // Add to whitelist
+        let result = client.add_to_whitelist(&user);
+        assert!(result.is_ok());
+        assert!(client.is_whitelisted(&user));
+
+        // Adding again should fail
+        let result2 = client.add_to_whitelist(&user);
+        assert_eq!(result2, Err(Ok(Error::AlreadyWhitelisted)));
+
+        // Remove from whitelist
+        let result3 = client.remove_from_whitelist(&user);
+        assert!(result3.is_ok());
+        assert!(!client.is_whitelisted(&user));
+
+        // Removing again should fail
+        let result4 = client.remove_from_whitelist(&user);
+        assert_eq!(result4, Err(Ok(Error::NotCurrentlyWhitelisted)));
+    }
+
+    #[test]
+    fn test_transfer_between_whitelisted_accounts() {
+        let (env, admin, client) = setup_test_contract();
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        client.initialize(&admin, &name, &symbol, &8u32, &1000i128).unwrap();
+
+        // Whitelist users
+        client.add_to_whitelist(&user1).unwrap();
+        client.add_to_whitelist(&user2).unwrap();
+
+        // Transfer some tokens to user1
+        let transfer_amount = 100i128;
+        let result = client.transfer(&admin, &user1, &transfer_amount);
+        assert!(result.is_ok());
+
+        assert_eq!(client.balance(&admin), 900);
+        assert_eq!(client.balance(&user1), 100);
+
+        // Transfer from user1 to user2
+        let result2 = client.transfer(&user1, &user2, &50i128);
+        assert!(result2.is_ok());
+
+        assert_eq!(client.balance(&user1), 50);
+        assert_eq!(client.balance(&user2), 50);
+    }
+
+    #[test]
+    fn test_transfer_fails_for_non_whitelisted() {
+        let (env, admin, client) = setup_test_contract();
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        client.initialize(&admin, &name, &symbol, &8u32, &1000i128).unwrap();
+
+        // Only whitelist user1
+        client.add_to_whitelist(&user1).unwrap();
+
+        // Transfer from admin to non-whitelisted user2 should fail
+        let result = client.transfer(&admin, &user2, &100i128);
+        assert_eq!(result, Err(Ok(Error::NotWhitelisted)));
+
+        // Transfer from non-whitelisted user2 should fail
+        let result2 = client.transfer(&user2, &user1, &100i128);
+        assert_eq!(result2, Err(Ok(Error::NotWhitelisted)));
+    }
+
+    #[test]
+    fn test_transfer_insufficient_balance() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        client.initialize(&admin, &name, &symbol, &8u32, &1000i128).unwrap();
+
+        // Whitelist user
+        client.add_to_whitelist(&user).unwrap();
+
+        // Try to transfer more than balance
+        let result = client.transfer(&user, &admin, &100i128);
+        assert_eq!(result, Err(Ok(Error::InsufficientBalance)));
+    }
+
+    #[test]
+    fn test_approve_and_transfer_from() {
+        let (env, admin, client) = setup_test_contract();
+        let owner = Address::generate(&env);
+        let spender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        client.initialize(&admin, &name, &symbol, &8u32, &1000i128).unwrap();
+
+        // Whitelist all accounts
+        client.add_to_whitelist(&owner).unwrap();
+        client.add_to_whitelist(&spender).unwrap();
+        client.add_to_whitelist(&recipient).unwrap();
+
+        // Transfer tokens to owner
+        client.transfer(&admin, &owner, &500i128).unwrap();
+
+        // Approve spender
+        let approval_amount = 200i128;
+        let result = client.approve(&owner, &spender, &approval_amount);
+        assert!(result.is_ok());
+        assert_eq!(client.allowance(&owner, &spender), approval_amount);
+
+        // Transfer from owner to recipient using allowance
+        let transfer_amount = 150i128;
+        let result2 = client.transfer_from(&spender, &owner, &recipient, &transfer_amount);
+        assert!(result2.is_ok());
+
+        // Check balances and remaining allowance
+        assert_eq!(client.balance(&owner), 350); // 500 - 150
+        assert_eq!(client.balance(&recipient), 150);
+        assert_eq!(client.allowance(&owner, &spender), 50); // 200 - 150
+    }
+
+    #[test]
+    fn test_mint_tokens() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        let initial_supply = 1000i128;
+        client.initialize(&admin, &name, &symbol, &8u32, &initial_supply).unwrap();
+
+        // Whitelist user
+        client.add_to_whitelist(&user).unwrap();
+
+        // Mint tokens to user
+        let mint_amount = 500i128;
+        let result = client.mint(&user, &mint_amount);
+        assert!(result.is_ok());
+
+        // Check balance and total supply
+        assert_eq!(client.balance(&user), mint_amount);
+        let token_info = client.token_info().unwrap();
+        assert_eq!(token_info.total_supply, initial_supply + mint_amount);
+    }
+
+    #[test]
+    fn test_mint_fails_for_non_whitelisted() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        client.initialize(&admin, &name, &symbol, &8u32, &1000i128).unwrap();
+
+        // Try to mint to non-whitelisted user
+        let result = client.mint(&user, &500i128);
+        assert_eq!(result, Err(Ok(Error::NotWhitelisted)));
+    }
+
+    #[test]
+    fn test_burn_tokens() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        let initial_supply = 1000i128;
+        client.initialize(&admin, &name, &symbol, &8u32, &initial_supply).unwrap();
+
+        // Whitelist user and transfer tokens
+        client.add_to_whitelist(&user).unwrap();
+        client.transfer(&admin, &user, &300i128).unwrap();
+
+        // Burn tokens from user account
+        let burn_amount = 100i128;
+        let result = client.burn(&user, &burn_amount);
+        assert!(result.is_ok());
+
+        // Check balance and total supply
+        assert_eq!(client.balance(&user), 200); // 300 - 100
+        let token_info = client.token_info().unwrap();
+        assert_eq!(token_info.total_supply, initial_supply - burn_amount);
+    }
+
+    #[test]
+    fn test_burn_insufficient_balance() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        client.initialize(&admin, &name, &symbol, &8u32, &1000i128).unwrap();
+
+        // Whitelist user
+        client.add_to_whitelist(&user).unwrap();
+
+        // Try to burn more than balance
+        let result = client.burn(&user, &100i128);
+        assert_eq!(result, Err(Ok(Error::InsufficientBalance)));
+    }
+
+    #[test]
+    fn test_invalid_amounts() {
+        let (env, admin, client) = setup_test_contract();
+        let user = Address::generate(&env);
+        
+        // Initialize contract
+        let name = String::from_str(&env, "Test Token");
+        let symbol = String::from_str(&env, "TEST");
+        client.initialize(&admin, &name, &symbol, &8u32, &1000i128).unwrap();
+
+        // Whitelist user
+        client.add_to_whitelist(&user).unwrap();
+
+        // Test invalid transfer amount
+        let result = client.transfer(&admin, &user, &0i128);
+        assert_eq!(result, Err(Ok(Error::InvalidAmount)));
+
+        let result2 = client.transfer(&admin, &user, &-100i128);
+        assert_eq!(result2, Err(Ok(Error::InvalidAmount)));
+
+        // Test invalid mint amount
+        let result3 = client.mint(&user, &0i128);
+        assert_eq!(result3, Err(Ok(Error::InvalidAmount)));
+
+        // Test invalid burn amount
+        let result4 = client.burn(&admin, &-50i128);
+        assert_eq!(result4, Err(Ok(Error::InvalidAmount)));
+    }
+}
