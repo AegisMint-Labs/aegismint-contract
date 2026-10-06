@@ -12,7 +12,7 @@ pub enum StorageKey {
 
 /// Escrow status
 #[contracttype]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EscrowStatus {
     Active,
     Completed,
