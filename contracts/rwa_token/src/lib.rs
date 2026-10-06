@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env};
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -38,7 +38,7 @@ impl RwaTokenContract {
         env.storage().persistent().set(&DataKey::Whitelisted(account.clone()), &status);
         
         env.events().publish(
-            (b"whitelist_updated", account.clone()),
+            (symbol_short!("whitelist"), account.clone()),
             status,
         );
     }
@@ -79,7 +79,7 @@ impl RwaTokenContract {
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), 172800, 172800);
 
         env.events().publish(
-            (b"transfer", from.clone(), to.clone()),
+            (symbol_short!("transfer"), from.clone(), to.clone()),
             amount,
         );
 
