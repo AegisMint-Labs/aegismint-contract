@@ -11,7 +11,7 @@ env:
 
 jobs:
   test:
-    name: Test
+    name: Test and Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,41 +34,19 @@ jobs:
       
       - name: Run tests
         run: cargo test --verbose
-
-  build:
-    name: Build WASM
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
       
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          targets: wasm32-unknown-unknown
-      
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-      
-      - name: Install Stellar CLI via script
+      - name: Build contracts for wasm32-unknown-unknown
         run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-      
-      - name: Verify Stellar CLI
-        run: |
-          stellar --version
-      
-      - name: Build contracts
-        run: |
-          stellar contract build --package asset_factory
-          stellar contract build --package rwa-token  
-          stellar contract build --package marketplace_escrow
+          cargo build --package asset_factory --target wasm32-unknown-unknown --release
+          cargo build --package rwa-token --target wasm32-unknown-unknown --release
+          cargo build --package marketplace_escrow --target wasm32-unknown-unknown --release
       
       - name: Verify WASM files
         run: |
-          find target -name "*.wasm" -exec ls -la {} \;
+          ls -la target/wasm32-unknown-unknown/release/
+          echo "Asset Factory WASM size: $(wc -c < target/wasm32-unknown-unknown/release/asset_factory.wasm) bytes"
+          echo "RWA Token WASM size: $(wc -c < target/wasm32-unknown-unknown/release/rwa_token.wasm) bytes"
+          echo "Marketplace Escrow WASM size: $(wc -c < target/wasm32-unknown-unknown/release/marketplace_escrow.wasm) bytes"
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
