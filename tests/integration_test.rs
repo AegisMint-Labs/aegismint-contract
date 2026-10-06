@@ -40,7 +40,7 @@ fn test_complete_rwa_marketplace_workflow() {
     let min_timeout = 3600u64; // 1 hour
     let max_timeout = 604800u64; // 1 week
     let platform_fee = 250u32; // 2.5%
-    
+
     escrow_client.initialize(
         &platform_admin,
         &min_timeout,
@@ -91,7 +91,7 @@ fn test_complete_rwa_marketplace_workflow() {
     // Step 5: Distribute tokens to investors
     let investor1_amount = 100_000i128;
     let investor2_amount = 150_000i128;
-    
+
     token_client.transfer(&token_admin, &investor1, &investor1_amount).unwrap();
     token_client.transfer(&token_admin, &investor2, &investor2_amount).unwrap();
 
@@ -153,7 +153,7 @@ fn test_complete_rwa_marketplace_workflow() {
     // Step 8: Test additional factory functionality
     // Verify factory deployment tracking
     assert!(factory_client.is_factory_deployed(&deployed_token_address));
-    
+
     let factory_asset = factory_client.get_asset_by_address(&deployed_token_address).unwrap();
     assert_eq!(factory_asset.asset_id, 1);
 

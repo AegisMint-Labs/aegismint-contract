@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, 
+    contract, contracterror, contractimpl, contracttype,
     Address, Env, String, Symbol
 };
 
@@ -95,7 +95,6 @@ impl RwaTokenContract {
 
         // Set initial balance to admin
         env.storage().persistent().set(&DataKey::Balance(admin.clone()), &total_supply);
-        
         // Extend TTL for admin balance
         env.storage().persistent().extend_ttl(&DataKey::Balance(admin.clone()), 172800, 172800);
 
@@ -121,8 +120,7 @@ impl RwaTokenContract {
     /// Get token information
     pub fn token_info(env: Env) -> Result<TokenInfo, Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin)
-            .ok_or(Error::Unauthorized)?;
-        let name: String = env.storage().instance().get(&DataKey::Name)
+            .ok_or(Error::Unauthorized)?;let name: String = env.storage().instance().get(&DataKey::Name)
             .ok_or(Error::Unauthorized)?;
         let symbol: String = env.storage().instance().get(&DataKey::Symbol)
             .ok_or(Error::Unauthorized)?;
@@ -164,7 +162,6 @@ impl RwaTokenContract {
     pub fn add_to_whitelist(env: Env, account: Address) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
-        
         admin.require_auth();
 
         // Check if already whitelisted
@@ -189,7 +186,6 @@ impl RwaTokenContract {
     pub fn remove_from_whitelist(env: Env, account: Address) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
-        
         admin.require_auth();
 
         // Check if currently whitelisted
@@ -353,7 +349,6 @@ impl RwaTokenContract {
     pub fn mint(env: Env, to: Address, amount: i128) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
-        
         admin.require_auth();
 
         // Validate amount
@@ -390,7 +385,6 @@ impl RwaTokenContract {
     pub fn burn(env: Env, from: Address, amount: i128) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
-        
         // Allow admin to burn any account's tokens, or users to burn their own
         if admin != from {
             admin.require_auth();
@@ -439,16 +433,16 @@ mod test {
         let contract_id = env.register(RwaTokenContract, ());
         let client = RwaTokenContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        
+
         env.mock_all_auths();
-        
+
         (env, admin, client)
     }
 
     #[test]
     fn test_initialize() {
         let (env, admin, client) = setup_test_contract();
-        
+
         let name = String::from_str(&env, "Real Estate Token");
         let symbol = String::from_str(&env, "RET");
         let decimals = 8u32;
@@ -473,7 +467,7 @@ mod test {
     #[test]
     fn test_initialize_twice_fails() {
         let (env, admin, client) = setup_test_contract();
-        
+
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
 
@@ -490,7 +484,7 @@ mod test {
     fn test_whitelist_management() {
         let (env, admin, client) = setup_test_contract();
         let user = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
@@ -523,7 +517,7 @@ mod test {
         let (env, admin, client) = setup_test_contract();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
@@ -554,7 +548,7 @@ mod test {
         let (env, admin, client) = setup_test_contract();
         let user1 = Address::generate(&env);
         let user2 = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
@@ -576,7 +570,7 @@ mod test {
     fn test_transfer_insufficient_balance() {
         let (env, admin, client) = setup_test_contract();
         let user = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
@@ -596,7 +590,7 @@ mod test {
         let owner = Address::generate(&env);
         let spender = Address::generate(&env);
         let recipient = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
@@ -631,7 +625,7 @@ mod test {
     fn test_mint_tokens() {
         let (env, admin, client) = setup_test_contract();
         let user = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
@@ -656,7 +650,7 @@ mod test {
     fn test_mint_fails_for_non_whitelisted() {
         let (env, admin, client) = setup_test_contract();
         let user = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
@@ -671,7 +665,7 @@ mod test {
     fn test_burn_tokens() {
         let (env, admin, client) = setup_test_contract();
         let user = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
@@ -697,7 +691,7 @@ mod test {
     fn test_burn_insufficient_balance() {
         let (env, admin, client) = setup_test_contract();
         let user = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
@@ -715,7 +709,7 @@ mod test {
     fn test_invalid_amounts() {
         let (env, admin, client) = setup_test_contract();
         let user = Address::generate(&env);
-        
+
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");

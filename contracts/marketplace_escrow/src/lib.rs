@@ -66,7 +66,7 @@ pub enum DataKey {
     Initialized,
     /// Minimum escrow timeout (in seconds)
     MinTimeout,
-    /// Maximum escrow timeout (in seconds) 
+    /// Maximum escrow timeout (in seconds)
     MaxTimeout,
     /// Platform fee (in basis points, e.g., 250 = 2.5%)
     PlatformFee,
@@ -165,7 +165,7 @@ impl MarketplaceEscrowContract {
     pub fn update_platform_fee(env: Env, new_fee: u32) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
-        
+
         admin.require_auth();
 
         if new_fee > 10000 {
@@ -224,7 +224,7 @@ impl MarketplaceEscrowContract {
         // Create escrow
         let escrow_count: u64 = env.storage().instance().get(&DataKey::EscrowCount).unwrap_or(0);
         let new_escrow_id = escrow_count + 1;
-        
+
         let current_time = env.ledger().timestamp();
         let platform_fee: u32 = env.storage().instance().get(&DataKey::PlatformFee)
             .ok_or(Error::Unauthorized)?;
@@ -431,7 +431,7 @@ impl MarketplaceEscrowContract {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
-    /// Get escrows by buyer  
+    /// Get escrows by buyer
     pub fn get_escrows_by_buyer(env: Env, buyer: Address) -> Vec<u64> {
         env.storage().persistent()
             .get(&DataKey::EscrowsByBuyer(buyer))
@@ -474,9 +474,9 @@ mod test {
         let contract_id = env.register(MarketplaceEscrowContract, ());
         let client = MarketplaceEscrowContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        
+
         env.mock_all_auths();
-        
+
         (env, admin, client)
     }
 
@@ -484,15 +484,15 @@ mod test {
     fn test_initialize() {
         let (env, admin, client) = setup_test_escrow();
         let fee_recipient = Address::generate(&env);
-        
+
         let min_timeout = 3600u64; // 1 hour
-        let max_timeout = 604800u64; // 1 week  
+        let max_timeout = 604800u64; // 1 week
         let platform_fee = 250u32; // 2.5%
 
         let result = client.initialize(
             &admin,
             &min_timeout,
-            &max_timeout, 
+            &max_timeout,
             &platform_fee,
             &fee_recipient,
         );
@@ -617,7 +617,7 @@ mod test {
         assert_eq!(result4, Err(Ok(Error::InvalidTimeout)));
     }
 
-    #[test] 
+    #[test]
     fn test_escrow_queries() {
         let (env, admin, client) = setup_test_escrow();
         let fee_recipient = Address::generate(&env);
@@ -629,7 +629,7 @@ mod test {
 
         // Test with no escrows
         assert_eq!(client.escrow_count(), 0);
-        
+
         let seller_escrows = client.get_escrows_by_seller(&seller);
         assert_eq!(seller_escrows.len(), 0);
 
@@ -683,10 +683,10 @@ mod test {
         // In a real scenario, we would create an escrow and complete it
         let payment_amount = 10000i128;
         let platform_fee = 250u32; // 2.5%
-        
+
         let fee_amount = (payment_amount * platform_fee as i128) / 10000;
         let seller_amount = payment_amount - fee_amount;
-        
+
         assert_eq!(fee_amount, 250); // 2.5% of 10000
         assert_eq!(seller_amount, 9750); // 10000 - 250
     }

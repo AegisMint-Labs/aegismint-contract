@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, 
+    contract, contracterror, contractimpl, contracttype,
     Address, BytesN, Env, String, Symbol, Vec
 };
 
@@ -112,7 +112,7 @@ impl AssetFactoryContract {
     ) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
-        
+
         admin.require_auth();
 
         env.storage().instance().set(&DataKey::ApprovedWasm, &new_wasm_hash);
@@ -210,7 +210,7 @@ impl AssetFactoryContract {
         let asset_id: u64 = env.storage().instance()
             .get(&DataKey::AssetByAddress(contract_address))
             .ok_or(Error::AssetNotFound)?;
-        
+
         Self::get_asset(env, asset_id)
     }
 
@@ -284,9 +284,9 @@ mod test {
         let contract_id = env.register(AssetFactoryContract, ());
         let client = AssetFactoryContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        
+
         env.mock_all_auths();
-        
+
         (env, admin, client)
     }
 
@@ -332,7 +332,7 @@ mod test {
         assert_eq!(client.approved_wasm_hash().unwrap(), new_wasm);
     }
 
-    #[test] 
+    #[test]
     fn test_deploy_rwa_token_validation() {
         let (env, admin, client) = setup_test_factory();
         let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
@@ -346,7 +346,7 @@ mod test {
         // Test invalid total supply
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
-        
+
         let result = client.deploy_rwa_token(
             &deployer,
             &salt,
