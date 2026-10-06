@@ -16,16 +16,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust 1.84
+      - name: Install Rust 1.90
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.84.0
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
       - name: Verify Rust version and add target
         run: |
           source ~/.cargo/env
           rustc --version
-          rustup target add wasm32v1-none
+          # Try to add wasm32v1-none target, fall back to wasm32-unknown-unknown if not available
+          if rustup target add wasm32v1-none; then
+            echo "wasm32v1-none target successfully installed"
+            echo "WASM_TARGET=wasm32v1-none" >> $GITHUB_ENV
+          else
+            echo "wasm32v1-none target not available, falling back to wasm32-unknown-unknown"
+            rustup target add wasm32-unknown-unknown
+            echo "WASM_TARGET=wasm32-unknown-unknown" >> $GITHUB_ENV
+          fi
           rustup component add rustfmt clippy
       
       - name: Cache cargo registry
@@ -68,16 +76,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust 1.84
+      - name: Install Rust 1.90
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.84.0
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
       - name: Verify Rust version and add target
         run: |
           source ~/.cargo/env
           rustc --version
-          rustup target add wasm32v1-none
+          # Try to add wasm32v1-none target, fall back to wasm32-unknown-unknown if not available
+          if rustup target add wasm32v1-none; then
+            echo "wasm32v1-none target successfully installed"
+            echo "WASM_TARGET=wasm32v1-none" >> $GITHUB_ENV
+          else
+            echo "wasm32v1-none target not available, falling back to wasm32-unknown-unknown"
+            rustup target add wasm32-unknown-unknown
+            echo "WASM_TARGET=wasm32-unknown-unknown" >> $GITHUB_ENV
+          fi
       
       - name: Install system dependencies
         run: |
@@ -92,28 +108,28 @@ jobs:
       - name: Build asset_factory
         run: |
           source ~/.cargo/env
-          cargo build --package asset_factory --target wasm32v1-none --release
+          cargo build --package asset_factory --target $WASM_TARGET --release
           soroban contract optimize \
-            --wasm target/wasm32v1-none/release/asset_factory.wasm
+            --wasm target/$WASM_TARGET/release/asset_factory.wasm
       
       - name: Build rwa_token
         run: |
           source ~/.cargo/env
-          cargo build --package rwa_token --target wasm32v1-none --release
+          cargo build --package rwa_token --target $WASM_TARGET --release
           soroban contract optimize \
-            --wasm target/wasm32v1-none/release/rwa_token.wasm
+            --wasm target/$WASM_TARGET/release/rwa_token.wasm
       
       - name: Build marketplace_escrow
         run: |
           source ~/.cargo/env
-          cargo build --package marketplace_escrow --target wasm32v1-none --release
+          cargo build --package marketplace_escrow --target $WASM_TARGET --release
           soroban contract optimize \
-            --wasm target/wasm32v1-none/release/marketplace_escrow.wasm
+            --wasm target/$WASM_TARGET/release/marketplace_escrow.wasm
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: contracts
           path: |
-            target/wasm32v1-none/release/*.wasm
-            target/wasm32v1-none/release/*.optimized.wasm
+            target/*/release/*.wasm
+            target/*/release/*.optimized.wasm
