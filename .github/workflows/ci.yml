@@ -20,7 +20,8 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: "1.84"
+          target: wasm32v1-none
           override: true
           components: rustfmt, clippy
       
@@ -62,8 +63,8 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
-          target: wasm32-unknown-unknown
+          toolchain: "1.84"
+          target: wasm32v1-none
           override: true
       
       - name: Install system dependencies
@@ -77,26 +78,26 @@ jobs:
       
       - name: Build asset_factory
         run: |
-          cargo build --package asset_factory --target wasm32-unknown-unknown --release
+          cargo build --package asset_factory --target wasm32v1-none --release
           soroban contract optimize \
-            --wasm target/wasm32-unknown-unknown/release/asset_factory.wasm
+            --wasm target/wasm32v1-none/release/asset_factory.wasm
       
       - name: Build rwa_token
         run: |
-          cargo build --package rwa_token --target wasm32-unknown-unknown --release
+          cargo build --package rwa_token --target wasm32v1-none --release
           soroban contract optimize \
-            --wasm target/wasm32-unknown-unknown/release/rwa_token.wasm
+            --wasm target/wasm32v1-none/release/rwa_token.wasm
       
       - name: Build marketplace_escrow
         run: |
-          cargo build --package marketplace_escrow --target wasm32-unknown-unknown --release
+          cargo build --package marketplace_escrow --target wasm32v1-none --release
           soroban contract optimize \
-            --wasm target/wasm32-unknown-unknown/release/marketplace_escrow.wasm
+            --wasm target/wasm32v1-none/release/marketplace_escrow.wasm
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: contracts
           path: |
-            target/wasm32-unknown-unknown/release/*.wasm
-            target/wasm32-unknown-unknown/release/*.optimized.wasm
+            target/wasm32v1-none/release/*.wasm
+            target/wasm32v1-none/release/*.optimized.wasm
