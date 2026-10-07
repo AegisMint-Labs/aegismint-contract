@@ -8,7 +8,7 @@ help: ## Show this help message
 
 install-deps: ## Install required dependencies
 	@echo "Installing Rust toolchain..."
-	rustup target add wasm32-unknown-unknown
+	rustup target add wasm32v1-none
 	@echo "Installing Soroban CLI..."
 	cargo install --locked soroban-cli --features opt
 
@@ -20,19 +20,19 @@ build-release: ## Build all contracts in release mode
 
 build-wasm: ## Build WASM binaries for all contracts
 	@echo "Building asset_factory..."
-	cargo build --package asset_factory --target wasm32-unknown-unknown --release
+	cargo build --package asset_factory --target wasm32v1-none --release
 	@echo "Building rwa_token..."
-	cargo build --package rwa_token --target wasm32-unknown-unknown --release
+	cargo build --package rwa_token --target wasm32v1-none --release
 	@echo "Building marketplace_escrow..."
-	cargo build --package marketplace_escrow --target wasm32-unknown-unknown --release
+	cargo build --package marketplace_escrow --target wasm32v1-none --release
 
 optimize: build-wasm ## Optimize WASM binaries
 	@echo "Optimizing asset_factory..."
-	soroban contract optimize --wasm target/wasm32-unknown-unknown/release/asset_factory.wasm
+	soroban contract optimize --wasm target/wasm32v1-none/release/asset_factory.wasm
 	@echo "Optimizing rwa_token..."
-	soroban contract optimize --wasm target/wasm32-unknown-unknown/release/rwa_token.wasm
+	soroban contract optimize --wasm target/wasm32v1-none/release/rwa_token.wasm
 	@echo "Optimizing marketplace_escrow..."
-	soroban contract optimize --wasm target/wasm32-unknown-unknown/release/marketplace_escrow.wasm
+	soroban contract optimize --wasm target/wasm32v1-none/release/marketplace_escrow.wasm
 
 test: ## Run all tests
 	cargo test
@@ -60,8 +60,8 @@ lint: ## Run clippy linter
 
 clean: ## Clean build artifacts
 	cargo clean
-	rm -f target/wasm32-unknown-unknown/release/*.wasm
-	rm -f target/wasm32-unknown-unknown/release/*.optimized.wasm
+	rm -f target/wasm32v1-none/release/*.wasm
+	rm -f target/wasm32v1-none/release/*.optimized.wasm
 
 check: ## Run cargo check
 	cargo check
@@ -81,16 +81,16 @@ deploy-testnet: optimize ## Deploy contracts to Stellar testnet (requires STELLA
 	fi
 	@echo "Deploying asset_factory..."
 	soroban contract deploy \
-		--wasm target/wasm32-unknown-unknown/release/asset_factory.optimized.wasm \
+		--wasm target/wasm32v1-none/release/asset_factory.optimized.wasm \
 		--source $$STELLAR_SECRET_KEY \
 		--network testnet
 	@echo "Deploying rwa_token..."
 	soroban contract deploy \
-		--wasm target/wasm32-unknown-unknown/release/rwa_token.optimized.wasm \
+		--wasm target/wasm32v1-none/release/rwa_token.optimized.wasm \
 		--source $$STELLAR_SECRET_KEY \
 		--network testnet
 	@echo "Deploying marketplace_escrow..."
 	soroban contract deploy \
-		--wasm target/wasm32-unknown-unknown/release/marketplace_escrow.optimized.wasm \
+		--wasm target/wasm32v1-none/release/marketplace_escrow.optimized.wasm \
 		--source $$STELLAR_SECRET_KEY \
 		--network testnet

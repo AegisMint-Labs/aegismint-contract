@@ -15,7 +15,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
       
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -32,13 +32,13 @@ jobs:
           cargo check --package marketplace_escrow
           
           echo "🏗️ Building WASM for asset_factory..."
-          cargo build --package asset_factory --target wasm32-unknown-unknown --release
+          cargo build --package asset_factory --target wasm32v1-none --release
           
           echo "🏗️ Building WASM for rwa-token..."
-          cargo build --package rwa-token --target wasm32-unknown-unknown --release
+          cargo build --package rwa-token --target wasm32v1-none --release
           
           echo "🏗️ Building WASM for marketplace_escrow..."
-          cargo build --package marketplace_escrow --target wasm32-unknown-unknown --release
+          cargo build --package marketplace_escrow --target wasm32v1-none --release
           
           echo "✅ All contracts compiled successfully!"
-          ls -la target/wasm32-unknown-unknown/release/*.wasm
+          ls -la target/wasm32v1-none/release/*.wasm

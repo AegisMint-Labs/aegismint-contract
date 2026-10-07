@@ -59,13 +59,13 @@ cargo test
 
 ```bash
 # Build asset factory
-cargo build --package asset_factory --target wasm32-unknown-unknown --release
+cargo build --package asset_factory --target wasm32v1-none --release
 
 # Build RWA token
-cargo build --package rwa_token --target wasm32-unknown-unknown --release
+cargo build --package rwa_token --target wasm32v1-none --release
 
 # Build marketplace escrow
-cargo build --package marketplace_escrow --target wasm32-unknown-unknown --release
+cargo build --package marketplace_escrow --target wasm32v1-none --release
 ```
 
 ## 🧪 Testing
@@ -95,19 +95,19 @@ soroban config network add --global testnet \
 
 # Deploy asset factory
 soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/asset_factory.wasm \
+  --wasm target/wasm32v1-none/release/asset_factory.wasm \
   --source <YOUR_SECRET_KEY> \
   --network testnet
 
 # Deploy RWA token
 soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/rwa_token.wasm \
+  --wasm target/wasm32v1-none/release/rwa_token.wasm \
   --source <YOUR_SECRET_KEY> \
   --network testnet
 
 # Deploy marketplace escrow
 soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/marketplace_escrow.wasm \
+  --wasm target/wasm32v1-none/release/marketplace_escrow.wasm \
   --source <YOUR_SECRET_KEY> \
   --network testnet
 ```

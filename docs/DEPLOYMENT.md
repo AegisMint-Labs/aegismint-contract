@@ -7,7 +7,7 @@ This guide covers deploying AegisMint contracts to Stellar networks.
 1. **Rust & Cargo**
    ```bash
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   rustup target add wasm32-unknown-unknown
+   rustup target add wasm32v1-none
    ```
 
 2. **Soroban CLI**
@@ -74,25 +74,25 @@ soroban config identity show deployer
 make build-wasm optimize
 
 # Or manually
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 
 # Optimize each contract
 soroban contract optimize \
-  --wasm target/wasm32-unknown-unknown/release/asset_factory.wasm
+  --wasm target/wasm32v1-none/release/asset_factory.wasm
 
 soroban contract optimize \
-  --wasm target/wasm32-unknown-unknown/release/rwa_token.wasm
+  --wasm target/wasm32v1-none/release/rwa_token.wasm
 
 soroban contract optimize \
-  --wasm target/wasm32-unknown-unknown/release/marketplace_escrow.wasm
+  --wasm target/wasm32v1-none/release/marketplace_escrow.wasm
 ```
 
 ### Verify Build
 
 ```bash
 # Check WASM file sizes (optimized should be smaller)
-ls -lh target/wasm32-unknown-unknown/release/*.wasm
-ls -lh target/wasm32-unknown-unknown/release/*.optimized.wasm
+ls -lh target/wasm32v1-none/release/*.wasm
+ls -lh target/wasm32v1-none/release/*.optimized.wasm
 ```
 
 ## 🚀 Deployment
@@ -103,7 +103,7 @@ ls -lh target/wasm32-unknown-unknown/release/*.optimized.wasm
 
 ```bash
 ASSET_FACTORY_ID=$(soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/asset_factory.optimized.wasm \
+  --wasm target/wasm32v1-none/release/asset_factory.optimized.wasm \
   --source deployer \
   --network testnet)
 
@@ -114,7 +114,7 @@ echo "Asset Factory deployed: $ASSET_FACTORY_ID"
 
 ```bash
 RWA_TOKEN_ID=$(soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/rwa_token.optimized.wasm \
+  --wasm target/wasm32v1-none/release/rwa_token.optimized.wasm \
   --source deployer \
   --network testnet)
 
@@ -125,7 +125,7 @@ echo "RWA Token deployed: $RWA_TOKEN_ID"
 
 ```bash
 MARKETPLACE_ID=$(soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/marketplace_escrow.optimized.wasm \
+  --wasm target/wasm32v1-none/release/marketplace_escrow.optimized.wasm \
   --source deployer \
   --network testnet)
 
