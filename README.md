@@ -6,8 +6,7 @@
 [![Stellar Network](https://img.shields.io/badge/Stellar-Soroban-blue.svg)](https://stellar.org/soroban)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Wave Program](https://img.shields.io/badge/Drips%20Wave-Eligible-purple.svg)](https://www.drips.network)
-[![GrantFox](https://img.shields.io/badge/GrantFox-Verified-success.svg)](https://grantfox.io)
+
 
 </div>
 
