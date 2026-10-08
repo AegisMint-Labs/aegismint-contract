@@ -1,44 +1,30 @@
-name: CI
+name: Rust CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, dev ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install Rust
+
+      - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
-      
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-      
-      - name: Check and build all contracts
-        run: |
-          echo "🔍 Checking asset_factory..."
-          cargo check --package asset_factory
-          
-          echo "🔍 Checking rwa-token..."
-          cargo check --package rwa-token  
-          
-          echo "🔍 Checking marketplace_escrow..."
-          cargo check --package marketplace_escrow
-          
-          echo "🏗️ Building WASM for asset_factory..."
-          cargo build --package asset_factory --target wasm32v1-none --release
-          
-          echo "🏗️ Building WASM for rwa-token..."
-          cargo build --package rwa-token --target wasm32v1-none --release
-          
-          echo "🏗️ Building WASM for marketplace_escrow..."
-          cargo build --package marketplace_escrow --target wasm32v1-none --release
-          
-          echo "✅ All contracts compiled successfully!"
-          ls -la target/wasm32v1-none/release/*.wasm
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v28.1.0
+
+      - name: Build Contracts
+        run: stellar contract build
+
+      - name: Run Tests
+        run: cargo test

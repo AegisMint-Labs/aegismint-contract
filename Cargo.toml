@@ -2,7 +2,8 @@
 members = [
     "contracts/asset_factory",
     "contracts/rwa_token",
-    "contracts/marketplace_escrow"
+    "contracts/marketplace_escrow",
+    "tests"
 ]
 resolver = "2"
 

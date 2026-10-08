@@ -6,6 +6,19 @@ Thank you for your interest in contributing to AegisMint! This document provides
 
 We are committed to providing a welcoming and inclusive environment for all contributors. Please be respectful and constructive in all interactions.
 
+## 🌿 Branching Strategy
+
+AegisMint follows a dual-branch development model (`main` and `dev`):
+
+- **`main`**: The production-ready branch. Contains stable, reviewed, and audited smart contract releases. Direct commits to `main` are strictly prohibited.
+- **`dev`**: The primary integration branch. All new features, performance improvements, and bug fixes must be branched off and targeted toward `dev`.
+- **Feature Branches**: Branch names must follow standard conventions prefixed with their purpose:
+  - `feature/feature-name` (e.g., `feature/ttl-extension-safety`)
+  - `fix/bug-description` (e.g., `fix/escrow-refund-timeout`)
+  - `docs/doc-update` (e.g., `docs/api-reference`)
+
+All pull requests must target the **`dev`** branch unless delivering a hotfix directly tagged for a production release into **`main`**.
+
 ## 🚀 Getting Started
 
 1. **Fork the repository**
@@ -19,12 +32,12 @@ We are committed to providing a welcoming and inclusive environment for all cont
    cd aegismint-contract
    ```
 
-3. **Install dependencies**
+3. **Check out the `dev` branch**
    ```bash
-   make install-deps
+   git checkout dev
    ```
 
-4. **Create a new branch**
+4. **Create a new feature branch**
    ```bash
    git checkout -b feature/your-feature-name
    ```
@@ -109,7 +122,7 @@ chore(workspace): update soroban-sdk to v28.0.1
 1. **Update your branch**
    ```bash
    git fetch upstream
-   git rebase upstream/main
+   git rebase upstream/dev
    ```
 
 2. **Run all checks**
