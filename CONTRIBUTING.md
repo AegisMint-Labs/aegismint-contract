@@ -15,7 +15,7 @@ We are committed to providing a welcoming and inclusive environment for all cont
 
 2. **Clone your fork**
    ```bash
-   git clone https://github.com/YOUR-USERNAME/aegismint-contract.git
+   git clone https://github.com/AegisMint-Labs/aegismint-contract.git
    cd aegismint-contract
    ```
 

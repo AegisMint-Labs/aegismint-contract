@@ -1,14 +1,44 @@
-# AegisMint Contracts
+<div align="center">
 
-Soroban smart contracts for compliant tokenization and secondary trading of Real World Assets (RWAs) on the Stellar blockchain. Built for the Stellar Soroban ecosystem and submitted for evaluation to Drips Waves and GrantFox.
+# AegisMint Labs
+### Institutional RWA Tokenization & Peer-to-Peer Marketplace Protocol on Stellar Soroban
+
+[![Stellar Network](https://img.shields.io/badge/Stellar-Soroban-blue.svg)](https://stellar.org/soroban)
+[![Rust Edition](https://img.shields.io/badge/Rust-2024-orange.svg)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Wave Program](https://img.shields.io/badge/Drips%20Wave-Eligible-purple.svg)](https://www.drips.network)
+[![GrantFox](https://img.shields.io/badge/GrantFox-Verified-success.svg)](https://grantfox.io)
+
+</div>
 
 ---
 
-## 🏗️ Architecture
+## Overview
 
-AegisMint implements an institutional-grade, multi-contract architecture enabling compliant asset fractionalization, governance controls, and trustless escrow settlement.
+AegisMint Labs is a decentralized real-world asset (RWA) compliance launchpad and marketplace built natively on the Stellar network using Soroban smart contracts. It bridges asset issuers, compliance officers, and global traders by enforcing strict on-chain transfer whitelists, deterministic asset factories, and atomic peer-to-peer escrow settlement.
 
-### System Architecture Diagram
+Submitted for evaluation to **Drips Waves** and **GrantFox**.
+
+---
+
+## System Architecture
+
+```text
+       [ Asset Issuer ] 
+              │
+              ▼
+   ┌─────────────────────┐
+   │    AssetFactory     │ ──(Deploys & Initialises)──► [ RwaToken Contracts ]
+   └─────────────────────┘                                       │
+              │ (Whitelisting & Compliance)                      │ (Fractional Balances)
+              ▼                                                  ▼
+   ┌────────────────────────────────────────────────────────────────────────┐
+   │                         MarketplaceEscrow                              │
+   │            (Atomic P2P Settlement against Stablecoins / USDC)          │
+   └────────────────────────────────────────────────────────────────────────┘
+```
+
+### Detailed Contract Interactions
 
 ```mermaid
 flowchart TD
@@ -39,19 +69,19 @@ flowchart TD
         RefundExpired["refund_expired_escrow()"]
     end
 
-    Issuer -->|"1. Initializes & uploads approved token WASM"| FactoryInit
+    Issuer -->|"1. Initializes with approved token WASM"| FactoryInit
     Issuer -->|"2. Deploys fractionalized RWA instance"| DeployRWA
     DeployRWA -->|"Instantiates with salt"| Token
     DeployRWA -->|"Records deployment"| Registry
 
     Issuer -->|"3. Whitelists investors & mints supply"| Compliance
-    Issuer -->|"Mints"| Operations
+    Issuer -->|"Mints initial tokens"| Operations
 
-    Seller -->|"4. Deposits tokens to escrow"| CreateEscrow
-    Buyer -->|"5. Verifies terms & submits payment"| CompleteEscrow
-    CompleteEscrow -->|"Releases tokens to Buyer"| Operations
-    CompleteEscrow -->|"Transfers platform fee"| EscrowInit
-    Seller -->|"Reclaims unsold/disputed deposit"| CancelEscrow
+    Seller -->|"4. Deposits tokens into escrow"| CreateEscrow
+    Buyer -->|"5. Fulfills terms & deposits payment"| CompleteEscrow
+    CompleteEscrow -->|"Atomic settlement to Buyer"| Operations
+    CompleteEscrow -->|"Transfers protocol fee"| EscrowInit
+    Seller -->|"Reclaims unfulfilled deposit"| CancelEscrow
 ```
 
 ### Core Contracts
@@ -116,7 +146,7 @@ cargo test -- --nocapture
 
 ---
 
-## 📦 Testnet Deployment & Invocation
+## 🌐 Testnet Deployment & Invocation
 
 ### 1. Configure Stellar Testnet Identity
 
@@ -135,7 +165,7 @@ stellar contract deploy \
   --source alice \
   --network testnet
 
-# Deploy RWA Token WASM (stored on-chain for factory deployment)
+# Install RWA Token WASM on-chain for factory deployment
 stellar contract install \
   --wasm target/wasm32v1-none/release/rwa_token.wasm \
   --source alice \
@@ -152,7 +182,7 @@ stellar contract deploy \
 
 ```bash
 # Set deployment environment variables
-FACTORY_CONTRACT_ID="CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+FACTORY_CONTRACT_ID="CB7VZCJWUBZZFAFYZYSPATZEOFUZKP2PJ2DNRA6KVC5HYN3FFY5AJ5NP"
 RWA_TOKEN_WASM_HASH="b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c"
 
 # Initialize factory with approved token WASM hash
@@ -173,8 +203,8 @@ stellar contract invoke \
   --deployer alice \
   --salt "0101010101010101010101010101010101010101010101010101010101010101" \
   --token_admin alice \
-  --name "Manhattan Commercial Property #104" \
-  --symbol "MCP104" \
+  --name "US Treasury 4-Week T-Bill Token" \
+  --symbol "USTB" \
   --decimals 7 \
   --total_supply 10000000000000
 ```
@@ -208,12 +238,12 @@ aegismint-contract/
 
 ## 👥 Maintainers & Contact
 
-**AegisMint Labs Core Team**
+**AegisMint Labs Core Engineering Team**
 - **Repository**: [AegisMint-Labs/aegismint-contract](https://github.com/AegisMint-Labs/aegismint-contract)
 - **Organization**: [AegisMint Labs](https://github.com/AegisMint-Labs)
 - **Technical Inquiries**: dev@aegismint.io
 - **Security Inquiries**: security@aegismint.io
-- **Grants & Review Inquiries**: grants@aegismint.io
+- **Grants & Evaluation**: grants@aegismint.io
 
 ---
 
