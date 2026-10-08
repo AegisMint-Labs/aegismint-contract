@@ -16,7 +16,7 @@
 
 AegisMint Labs is a decentralized real-world asset (RWA) compliance launchpad and marketplace built natively on the Stellar network using Soroban smart contracts. It bridges asset issuers, compliance officers, and global traders by enforcing strict on-chain transfer whitelists, deterministic asset factories, and atomic peer-to-peer escrow settlement.
 
-Submitted for evaluation to **Drips Waves** and **GrantFox**.
+Submitted for evaluation.
 
 ---
 
