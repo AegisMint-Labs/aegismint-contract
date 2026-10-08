@@ -22,3 +22,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Test snapshots
+**/test_snapshots/

@@ -279,75 +279,75 @@ mod test {
     use super::*;
     use soroban_sdk::{testutils::Address as _, Env};
 
-    fn setup_test_factory() -> (Env, Address, AssetFactoryContractClient) {
-        let env = Env::default();
+    fn setup_test_factory<'a>(env: &'a Env) -> (Address, AssetFactoryContractClient<'a>) {
         let contract_id = env.register(AssetFactoryContract, ());
-        let client = AssetFactoryContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let client = AssetFactoryContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
 
         env.mock_all_auths();
 
-        (env, admin, client)
+        (admin, client)
     }
 
     #[test]
     fn test_initialize() {
-        let (env, admin, client) = setup_test_factory();
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
         let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
 
-        let result = client.initialize(&admin, &wasm_hash);
-        assert!(result.is_ok());
+        client.initialize(&admin, &wasm_hash);
 
-        assert_eq!(client.admin().unwrap(), admin);
-        assert_eq!(client.approved_wasm_hash().unwrap(), wasm_hash);
+        assert_eq!(client.admin(), admin);
+        assert_eq!(client.approved_wasm_hash(), wasm_hash);
         assert_eq!(client.asset_count(), 0);
     }
 
     #[test]
     fn test_initialize_twice_fails() {
-        let (env, admin, client) = setup_test_factory();
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
         let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
 
         // First initialization should succeed
-        let result = client.initialize(&admin, &wasm_hash);
-        assert!(result.is_ok());
+        client.initialize(&admin, &wasm_hash);
 
         // Second initialization should fail
-        let result2 = client.initialize(&admin, &wasm_hash);
+        let result2 = client.try_initialize(&admin, &wasm_hash);
         assert_eq!(result2, Err(Ok(Error::AlreadyInitialized)));
     }
 
     #[test]
     fn test_update_approved_wasm_hash() {
-        let (env, admin, client) = setup_test_factory();
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
         let initial_wasm = BytesN::from_array(&env, &[1u8; 32]);
         let new_wasm = BytesN::from_array(&env, &[2u8; 32]);
 
         // Initialize factory
-        client.initialize(&admin, &initial_wasm).unwrap();
+        client.initialize(&admin, &initial_wasm);
 
         // Update WASM hash
-        let result = client.update_approved_wasm_hash(&new_wasm);
-        assert!(result.is_ok());
-        assert_eq!(client.approved_wasm_hash().unwrap(), new_wasm);
+        client.update_approved_wasm_hash(&new_wasm);
+        assert_eq!(client.approved_wasm_hash(), new_wasm);
     }
 
     #[test]
     fn test_deploy_rwa_token_validation() {
-        let (env, admin, client) = setup_test_factory();
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
         let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
         let deployer = Address::generate(&env);
         let token_admin = Address::generate(&env);
         let salt = BytesN::from_array(&env, &[3u8; 32]);
 
         // Initialize factory
-        client.initialize(&admin, &wasm_hash).unwrap();
+        client.initialize(&admin, &wasm_hash);
 
         // Test invalid total supply
         let name = String::from_str(&env, "Test Token");
         let symbol = String::from_str(&env, "TEST");
 
-        let result = client.deploy_rwa_token(
+        let result = client.try_deploy_rwa_token(
             &deployer,
             &salt,
             &token_admin,
@@ -358,7 +358,7 @@ mod test {
         );
         assert_eq!(result, Err(Ok(Error::InvalidParameters)));
 
-        let result2 = client.deploy_rwa_token(
+        let result2 = client.try_deploy_rwa_token(
             &deployer,
             &salt,
             &token_admin,
@@ -372,11 +372,12 @@ mod test {
 
     #[test]
     fn test_asset_queries() {
-        let (env, admin, client) = setup_test_factory();
-        let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
+        let target_wasm = BytesN::from_array(&env, &[1u8; 32]);
 
         // Initialize factory
-        client.initialize(&admin, &wasm_hash).unwrap();
+        client.initialize(&admin, &target_wasm);
 
         // Test empty state
         assert_eq!(client.asset_count(), 0);
@@ -386,11 +387,12 @@ mod test {
 
     #[test]
     fn test_pagination() {
-        let (env, admin, client) = setup_test_factory();
-        let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
+        let target_wasm = BytesN::from_array(&env, &[1u8; 32]);
 
         // Initialize factory
-        client.initialize(&admin, &wasm_hash).unwrap();
+        client.initialize(&admin, &target_wasm);
 
         // Test pagination with no assets
         let assets = client.get_assets(&0, &5);
@@ -403,12 +405,13 @@ mod test {
 
     #[test]
     fn test_deployer_queries() {
-        let (env, admin, client) = setup_test_factory();
-        let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
+        let target_wasm = BytesN::from_array(&env, &[1u8; 32]);
         let deployer = Address::generate(&env);
 
         // Initialize factory
-        client.initialize(&admin, &wasm_hash).unwrap();
+        client.initialize(&admin, &target_wasm);
 
         // Test with no deployments
         let assets = client.get_assets_by_deployer(&deployer);
@@ -417,12 +420,13 @@ mod test {
 
     #[test]
     fn test_is_factory_deployed() {
-        let (env, admin, client) = setup_test_factory();
-        let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
+        let target_wasm = BytesN::from_array(&env, &[1u8; 32]);
         let random_address = Address::generate(&env);
 
         // Initialize factory
-        client.initialize(&admin, &wasm_hash).unwrap();
+        client.initialize(&admin, &target_wasm);
 
         // Test with random address (should return false)
         assert!(!client.is_factory_deployed(&random_address));

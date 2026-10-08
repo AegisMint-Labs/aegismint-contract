@@ -293,7 +293,7 @@ impl MarketplaceEscrowContract {
 
         // Transfer platform fee to fee recipient
         if fee_amount > 0 {
-            let fee_recipient: Address = env.storage().instance()
+            let _fee_recipient: Address = env.storage().instance()
                 .get(&DataKey::FeeRecipient)
                 .ok_or(Error::Unauthorized)?;
             // Fee transfer logic would go here
@@ -469,39 +469,38 @@ mod test {
     use super::*;
     use soroban_sdk::{testutils::Address as _, Env};
 
-    fn setup_test_escrow() -> (Env, Address, MarketplaceEscrowContractClient) {
-        let env = Env::default();
+    fn setup_test_escrow<'a>(env: &'a Env) -> (Address, MarketplaceEscrowContractClient<'a>) {
         let contract_id = env.register(MarketplaceEscrowContract, ());
-        let client = MarketplaceEscrowContractClient::new(&env, &contract_id);
-        let admin = Address::generate(&env);
+        let client = MarketplaceEscrowContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
 
         env.mock_all_auths();
 
-        (env, admin, client)
+        (admin, client)
     }
 
     #[test]
     fn test_initialize() {
-        let (env, admin, client) = setup_test_escrow();
+        let env = Env::default();
+        let (admin, client) = setup_test_escrow(&env);
         let fee_recipient = Address::generate(&env);
 
         let min_timeout = 3600u64; // 1 hour
         let max_timeout = 604800u64; // 1 week
         let platform_fee = 250u32; // 2.5%
 
-        let result = client.initialize(
+        client.initialize(
             &admin,
             &min_timeout,
             &max_timeout,
             &platform_fee,
             &fee_recipient,
         );
-        assert!(result.is_ok());
 
-        assert_eq!(client.admin().unwrap(), admin);
+        assert_eq!(client.admin(), admin);
         assert_eq!(client.escrow_count(), 0);
 
-        let config = client.get_platform_config().unwrap();
+        let config = client.get_platform_config();
         assert_eq!(config.0, min_timeout);
         assert_eq!(config.1, max_timeout);
         assert_eq!(config.2, platform_fee);
@@ -510,70 +509,72 @@ mod test {
 
     #[test]
     fn test_initialize_twice_fails() {
-        let (env, admin, client) = setup_test_escrow();
+        let env = Env::default();
+        let (admin, client) = setup_test_escrow(&env);
         let fee_recipient = Address::generate(&env);
 
         // First initialization should succeed
-        let result = client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
-        assert!(result.is_ok());
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
 
         // Second initialization should fail
-        let result2 = client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
+        let result2 = client.try_initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
         assert_eq!(result2, Err(Ok(Error::AlreadyInitialized)));
     }
 
     #[test]
     fn test_initialize_validation() {
-        let (env, admin, client) = setup_test_escrow();
+        let env = Env::default();
+        let (admin, client) = setup_test_escrow(&env);
         let fee_recipient = Address::generate(&env);
 
         // Test invalid timeout (min >= max)
-        let result = client.initialize(&admin, &604800u64, &3600u64, &250u32, &fee_recipient);
+        let result = client.try_initialize(&admin, &604800u64, &3600u64, &250u32, &fee_recipient);
         assert_eq!(result, Err(Ok(Error::InvalidTimeout)));
 
         // Test zero min timeout
-        let result2 = client.initialize(&admin, &0u64, &604800u64, &250u32, &fee_recipient);
+        let result2 = client.try_initialize(&admin, &0u64, &604800u64, &250u32, &fee_recipient);
         assert_eq!(result2, Err(Ok(Error::InvalidTimeout)));
 
         // Test excessive platform fee (>100%)
-        let result3 = client.initialize(&admin, &3600u64, &604800u64, &15000u32, &fee_recipient);
+        let result3 = client.try_initialize(&admin, &3600u64, &604800u64, &15000u32, &fee_recipient);
         assert_eq!(result3, Err(Ok(Error::InvalidAmount)));
     }
 
     #[test]
     fn test_update_platform_fee() {
-        let (env, admin, client) = setup_test_escrow();
+        let env = Env::default();
+        let (admin, client) = setup_test_escrow(&env);
         let fee_recipient = Address::generate(&env);
 
         // Initialize contract
-        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
 
         // Update platform fee
         let new_fee = 300u32; // 3%
-        let result = client.update_platform_fee(&new_fee);
-        assert!(result.is_ok());
+        client.update_platform_fee(&new_fee);
 
-        let config = client.get_platform_config().unwrap();
+        let config = client.get_platform_config();
         assert_eq!(config.2, new_fee);
 
         // Test invalid fee update
-        let result2 = client.update_platform_fee(&15000u32);
+        let result2 = client.try_update_platform_fee(&15000u32);
         assert_eq!(result2, Err(Ok(Error::InvalidAmount)));
     }
 
     #[test]
     fn test_escrow_creation_validation() {
-        let (env, admin, client) = setup_test_escrow();
+        let env = Env::default();
+        let (admin, client) = setup_test_escrow(&env);
         let fee_recipient = Address::generate(&env);
         let seller = Address::generate(&env);
         let buyer = Address::generate(&env);
         let token_contract = Address::generate(&env);
 
         // Initialize contract
-        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
 
         // Test invalid token amount
-        let result = client.create_escrow(
+        let result = client.try_create_escrow(
             &seller,
             &buyer,
             &token_contract,
@@ -584,7 +585,7 @@ mod test {
         assert_eq!(result, Err(Ok(Error::InvalidAmount)));
 
         // Test invalid payment amount
-        let result2 = client.create_escrow(
+        let result2 = client.try_create_escrow(
             &seller,
             &buyer,
             &token_contract,
@@ -595,7 +596,7 @@ mod test {
         assert_eq!(result2, Err(Ok(Error::InvalidAmount)));
 
         // Test timeout too short
-        let result3 = client.create_escrow(
+        let result3 = client.try_create_escrow(
             &seller,
             &buyer,
             &token_contract,
@@ -606,7 +607,7 @@ mod test {
         assert_eq!(result3, Err(Ok(Error::InvalidTimeout)));
 
         // Test timeout too long
-        let result4 = client.create_escrow(
+        let result4 = client.try_create_escrow(
             &seller,
             &buyer,
             &token_contract,
@@ -619,13 +620,14 @@ mod test {
 
     #[test]
     fn test_escrow_queries() {
-        let (env, admin, client) = setup_test_escrow();
+        let env = Env::default();
+        let (admin, client) = setup_test_escrow(&env);
         let fee_recipient = Address::generate(&env);
         let seller = Address::generate(&env);
         let buyer = Address::generate(&env);
 
         // Initialize contract
-        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
 
         // Test with no escrows
         assert_eq!(client.escrow_count(), 0);
@@ -637,43 +639,41 @@ mod test {
         assert_eq!(buyer_escrows.len(), 0);
 
         // Test non-existent escrow
-        let result = client.get_escrow(&1);
+        let result = client.try_get_escrow(&1);
         assert_eq!(result, Err(Ok(Error::EscrowNotFound)));
     }
 
     #[test]
     fn test_escrow_state_validation() {
-        let (env, admin, client) = setup_test_escrow();
+        let env = Env::default();
+        let (admin, client) = setup_test_escrow(&env);
         let fee_recipient = Address::generate(&env);
-        let seller = Address::generate(&env);
-        let buyer = Address::generate(&env);
 
         // Initialize contract
-        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
 
         // Test operations on non-existent escrow
-        let result = client.complete_escrow(&999);
+        let result = client.try_complete_escrow(&999);
         assert_eq!(result, Err(Ok(Error::EscrowNotFound)));
 
-        let result2 = client.cancel_escrow(&999);
+        let result2 = client.try_cancel_escrow(&999);
         assert_eq!(result2, Err(Ok(Error::EscrowNotFound)));
 
-        let result3 = client.refund_expired_escrow(&999);
+        let result3 = client.try_refund_expired_escrow(&999);
         assert_eq!(result3, Err(Ok(Error::EscrowNotFound)));
     }
 
     #[test]
     fn test_escrow_expiration_logic() {
-        let (env, admin, client) = setup_test_escrow();
+        let env = Env::default();
+        let (admin, client) = setup_test_escrow(&env);
         let fee_recipient = Address::generate(&env);
 
         // Initialize contract
-        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
 
         // Test refund on active (non-expired) escrow
-        // Since we can't easily mock contract creation without actual tokens,
-        // we test the validation logic for non-existent escrows
-        let result = client.refund_expired_escrow(&1);
+        let result = client.try_refund_expired_escrow(&1);
         assert_eq!(result, Err(Ok(Error::EscrowNotFound)));
     }
 
@@ -693,12 +693,13 @@ mod test {
 
     #[test]
     fn test_escrow_lists_empty() {
-        let (env, admin, client) = setup_test_escrow();
+        let env = Env::default();
+        let (admin, client) = setup_test_escrow(&env);
         let fee_recipient = Address::generate(&env);
         let user = Address::generate(&env);
 
         // Initialize contract
-        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient).unwrap();
+        client.initialize(&admin, &3600u64, &604800u64, &250u32, &fee_recipient);
 
         // Test empty escrow lists
         let seller_escrows = client.get_escrows_by_seller(&user);

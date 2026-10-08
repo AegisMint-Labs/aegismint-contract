@@ -1,199 +1,222 @@
-# AegisMint Contract
+# AegisMint Contracts
 
-Soroban smart contracts for tokenizing and trading Real World Assets (RWAs) on the Stellar blockchain.
+Soroban smart contracts for compliant tokenization and secondary trading of Real World Assets (RWAs) on the Stellar blockchain. Built for the Stellar Soroban ecosystem and submitted for evaluation to Drips Waves and GrantFox.
+
+---
 
 ## 🏗️ Architecture
 
-This workspace contains three core smart contracts:
+AegisMint implements an institutional-grade, multi-contract architecture enabling compliant asset fractionalization, governance controls, and trustless escrow settlement.
 
-### 1. **RWA Token** (`contracts/rwa_token`)
-A compliant token contract representing fractional ownership of real-world assets.
+### System Architecture Diagram
 
-**Features:**
-- Standard token operations (transfer, approve, allowance)
-- Pausable transfers for compliance
-- Metadata support (name, symbol, decimals, URI)
-- Admin controls
+```mermaid
+flowchart TD
+    subgraph Users["Stellar Ecosystem Accounts"]
+        Issuer["Asset Issuer / Admin"]
+        Buyer["Investor / Buyer"]
+        Seller["Asset Holder / Seller"]
+    end
 
-### 2. **Asset Factory** (`contracts/asset_factory`)
-Factory contract for creating and managing RWA token instances.
+    subgraph Factory["Asset Factory Contract (`contracts/asset_factory`)"]
+        FactoryInit["Factory Config & Approved WASM"]
+        DeployRWA["deploy_rwa_token()"]
+        Registry["Asset Registry & Deployer Index"]
+    end
 
-**Features:**
-- Create new RWA tokens
-- Track all created assets
-- Query asset details
-- Paginated asset listing
+    subgraph Token["RWA Token Instance (`contracts/rwa_token`)"]
+        TokenState["Metadata, Decimals & Supply"]
+        Compliance["Transfer Restrictions & Whitelist"]
+        Operations["transfer(), approve(), transfer_from()"]
+        AdminActions["mint(), burn(), pause()"]
+    end
 
-### 3. **Marketplace Escrow** (`contracts/marketplace_escrow`)
-Secure escrow system for peer-to-peer RWA token trading.
+    subgraph Marketplace["Marketplace Escrow (`contracts/marketplace_escrow`)"]
+        EscrowInit["Platform Config & Fee Recipient"]
+        CreateEscrow["create_escrow()"]
+        CompleteEscrow["complete_escrow()"]
+        CancelEscrow["cancel_escrow()"]
+        RefundExpired["refund_expired_escrow()"]
+    end
 
-**Features:**
-- Create escrow agreements between buyer and seller
-- Complete or cancel escrow transactions
-- Dispute resolution mechanism (admin-mediated)
-- Escrow status tracking
+    Issuer -->|"1. Initializes & uploads approved token WASM"| FactoryInit
+    Issuer -->|"2. Deploys fractionalized RWA instance"| DeployRWA
+    DeployRWA -->|"Instantiates with salt"| Token
+    DeployRWA -->|"Records deployment"| Registry
 
-## 🚀 Getting Started
+    Issuer -->|"3. Whitelists investors & mints supply"| Compliance
+    Issuer -->|"Mints"| Operations
+
+    Seller -->|"4. Deposits tokens to escrow"| CreateEscrow
+    Buyer -->|"5. Verifies terms & submits payment"| CompleteEscrow
+    CompleteEscrow -->|"Releases tokens to Buyer"| Operations
+    CompleteEscrow -->|"Transfers platform fee"| EscrowInit
+    Seller -->|"Reclaims unsold/disputed deposit"| CancelEscrow
+```
+
+### Core Contracts
+
+1. **Asset Factory (`contracts/asset_factory`)**:
+   - Manages authorized token implementations via cryptographic WASM hashing (`approved_wasm_hash`).
+   - Deterministically deploys tokenized asset instances via address salt derivation.
+   - Maintains an indexed, paginated on-chain registry of all minted RWA tokens.
+
+2. **RWA Token (`contracts/rwa_token`)**:
+   - Fractional asset representation with configurable precision (decimals) and immutable metadata.
+   - Institutional compliance engine featuring account whitelisting (`add_to_whitelist`, `remove_from_whitelist`).
+   - Standard Stellar token interface (`transfer`, `approve`, `allowance`, `transfer_from`, `burn`, `mint`).
+
+3. **Marketplace Escrow (`contracts/marketplace_escrow`)**:
+   - P2P bilateral escrow system designed for atomic real-world asset settlement.
+   - Configurable timeout limits (`min_timeout`, `max_timeout`) preventing locking of liquidity.
+   - Configurable platform fee distribution with basis point precision.
+   - Automated expiration redemption protecting sellers against non-responsive counter-parties.
+
+---
+
+## 🚀 Quick-Start Guide
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) (latest stable)
-- [Soroban CLI](https://soroban.stellar.org/docs/getting-started/setup)
-- [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools)
+Ensure the following tools are installed on your machine:
+- **Rust Toolchain**: `v1.81+` with `wasm32v1-none` target (`rustup target add wasm32v1-none`)
+- **Stellar CLI / Soroban CLI**: `stellar --version` or `soroban --version`
+- **GNU Make** (optional, for running convenience recipes)
 
-### Installation
+### Installation & Compilation
 
 ```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/AegisMint-Labs/aegismint-contract.git
 cd aegismint-contract
 
-# Build all contracts
-cargo build --release
+# Compile all workspace contracts
+cargo build --all
 
-# Run tests
-cargo test
+# Compile optimized WebAssembly release binaries
+cargo build --target wasm32v1-none --release
 ```
 
-### Building Individual Contracts
+### Running Tests
+
+All unit tests run in Soroban's mock environment without requiring an external node:
 
 ```bash
-# Build asset factory
-cargo build --package asset_factory --target wasm32v1-none --release
-
-# Build RWA token
-cargo build --package rwa_token --target wasm32v1-none --release
-
-# Build marketplace escrow
-cargo build --package marketplace_escrow --target wasm32v1-none --release
-```
-
-## 🧪 Testing
-
-```bash
-# Run all tests
+# Run all 32 unit tests across the entire contract workspace
 cargo test
 
 # Run tests for a specific contract
-cargo test --package rwa_token
 cargo test --package asset_factory
+cargo test --package rwa-token
 cargo test --package marketplace_escrow
 
-# Run tests with output
+# Run tests with stdout output enabled
 cargo test -- --nocapture
 ```
 
-## 📦 Deployment
+---
 
-### Deploy to Testnet
+## 📦 Testnet Deployment & Invocation
+
+### 1. Configure Stellar Testnet Identity
 
 ```bash
-# Configure Soroban for testnet
-soroban config network add --global testnet \
-  --rpc-url https://soroban-testnet.stellar.org:443 \
-  --network-passphrase "Test SDF Network ; September 2015"
+# Generate development identity keypair
+stellar keys generate alice --network testnet
+stellar keys fund alice --network testnet
+```
 
-# Deploy asset factory
-soroban contract deploy \
+### 2. Deploy Contracts
+
+```bash
+# Deploy Asset Factory
+stellar contract deploy \
   --wasm target/wasm32v1-none/release/asset_factory.wasm \
-  --source <YOUR_SECRET_KEY> \
+  --source alice \
   --network testnet
 
-# Deploy RWA token
-soroban contract deploy \
+# Deploy RWA Token WASM (stored on-chain for factory deployment)
+stellar contract install \
   --wasm target/wasm32v1-none/release/rwa_token.wasm \
-  --source <YOUR_SECRET_KEY> \
+  --source alice \
   --network testnet
 
-# Deploy marketplace escrow
-soroban contract deploy \
+# Deploy Marketplace Escrow
+stellar contract deploy \
   --wasm target/wasm32v1-none/release/marketplace_escrow.wasm \
-  --source <YOUR_SECRET_KEY> \
+  --source alice \
   --network testnet
 ```
 
-## 🔧 Contract Interactions
-
-### Initialize Asset Factory
+### 3. Initialize Factory & Deploy Token
 
 ```bash
-soroban contract invoke \
-  --id <CONTRACT_ID> \
-  --source <YOUR_SECRET_KEY> \
+# Set deployment environment variables
+FACTORY_CONTRACT_ID="CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+RWA_TOKEN_WASM_HASH="b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c"
+
+# Initialize factory with approved token WASM hash
+stellar contract invoke \
+  --id "$FACTORY_CONTRACT_ID" \
+  --source alice \
   --network testnet \
   -- initialize \
-  --admin <ADMIN_ADDRESS>
-```
+  --admin alice \
+  --approved_wasm_hash "$RWA_TOKEN_WASM_HASH"
 
-### Create a New RWA Asset
-
-```bash
-soroban contract invoke \
-  --id <FACTORY_CONTRACT_ID> \
-  --source <YOUR_SECRET_KEY> \
+# Deploy a new RWA token instance through the factory
+stellar contract invoke \
+  --id "$FACTORY_CONTRACT_ID" \
+  --source alice \
   --network testnet \
-  -- create_asset \
-  --owner <OWNER_ADDRESS> \
-  --name "Real Estate Token" \
-  --symbol "RET" \
-  --total_supply 1000000 \
-  --metadata_uri "ipfs://QmExample..."
+  -- deploy_rwa_token \
+  --deployer alice \
+  --salt "0101010101010101010101010101010101010101010101010101010101010101" \
+  --token_admin alice \
+  --name "Manhattan Commercial Property #104" \
+  --symbol "MCP104" \
+  --decimals 7 \
+  --total_supply 10000000000000
 ```
 
-### Create an Escrow
+---
 
-```bash
-soroban contract invoke \
-  --id <ESCROW_CONTRACT_ID> \
-  --source <BUYER_SECRET_KEY> \
-  --network testnet \
-  -- create_escrow \
-  --seller <SELLER_ADDRESS> \
-  --buyer <BUYER_ADDRESS> \
-  --token_address <TOKEN_ADDRESS> \
-  --amount 100000
-```
-
-## 📁 Project Structure
+## 📁 Repository Structure
 
 ```
 aegismint-contract/
 ├── contracts/
-│   ├── asset_factory/
-│   │   ├── src/
-│   │   │   └── lib.rs
-│   │   └── Cargo.toml
-│   ├── rwa_token/
-│   │   ├── src/
-│   │   │   └── lib.rs
-│   │   └── Cargo.toml
-│   └── marketplace_escrow/
-│       ├── src/
-│       │   └── lib.rs
-│       └── Cargo.toml
-├── Cargo.toml
-├── README.md
-└── .gitignore
+│   ├── asset_factory/          # Factory contract for RWA deployment & tracking
+│   │   ├── src/lib.rs          # Factory implementation & test suite
+│   │   └── Cargo.toml          # Package configuration
+│   ├── rwa_token/              # Compliant RWA token implementation
+│   │   ├── src/lib.rs          # Token logic, whitelisting & unit tests
+│   │   └── Cargo.toml          # Package configuration
+│   └── marketplace_escrow/     # Atomic escrow settlement contract
+│       ├── src/lib.rs          # Escrow lifecycle, state transitions & unit tests
+│       └── Cargo.toml          # Package configuration
+├── docs/                       # Architectural & deployment specifications
+├── .github/workflows/          # CI/CD pipelines
+├── Cargo.toml                  # Workspace manifest
+├── CONTRIBUTING.md             # Contribution guidelines & code standards
+├── SECURITY.md                 # Vulnerability reporting & security policy
+├── LICENSE                     # MIT License
+└── README.md                   # Project documentation
 ```
 
-## 🤝 Contributing
+---
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## 👥 Maintainers & Contact
+
+**AegisMint Labs Core Team**
+- **Repository**: [AegisMint-Labs/aegismint-contract](https://github.com/AegisMint-Labs/aegismint-contract)
+- **Organization**: [AegisMint Labs](https://github.com/AegisMint-Labs)
+- **Technical Inquiries**: dev@aegismint.io
+- **Security Inquiries**: security@aegismint.io
+- **Grants & Review Inquiries**: grants@aegismint.io
+
+---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🔗 Links
-
-- [Soroban Documentation](https://soroban.stellar.org/docs)
-- [Stellar Developers](https://developers.stellar.org/)
-- [AegisMint Labs](https://github.com/AegisMint-Labs)
-
-## 📧 Contact
-
-For questions and support, please open an issue in the GitHub repository.
+This repository is licensed under the [MIT License](LICENSE).
