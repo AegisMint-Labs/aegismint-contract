@@ -52,7 +52,7 @@ fn test_rwa_token_whitelisting_and_ttl_lifecycle() {
     assert!(token_client.is_whitelisted(&investor1));
 
     // Whitelist investor2 via add_to_whitelist
-    token_client.add_to_whitelist(&investor2);
+    token_client.add_to_whitelist(&admin, &investor2);
     assert!(token_client.is_whitelisted(&investor2));
 
     // Transfer to non-whitelisted account must fail

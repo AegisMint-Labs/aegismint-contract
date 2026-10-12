@@ -31,26 +31,49 @@ pub enum Error {
     NotCurrentlyWhitelisted = 7,
 }
 
+/// Allowance identifier key linking token owner and approved spender
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowanceKey {
+    pub owner: Address,
+    pub spender: Address,
+}
+
+/// Token state metadata structure (name, symbol, decimals)
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenState {
+    pub name: String,
+    pub symbol: String,
+    pub decimals: u32,
+}
+
 /// Storage keys for the RWA token contract
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     /// Contract administrator address
     Admin,
-    /// Token metadata: name
+    /// Token state metadata (name, symbol, decimals)
+    State,
+    /// Individual account balance: Balance(account_address)
+    Balance(Address),
+    /// Transfer allowance: Allowance(AllowanceKey)
+    Allowance(AllowanceKey),
+    /// Whitelist compliance status: Whitelist(account_address) -> bool
+    Whitelist(Address),
+    /// Legacy allowance pair for compatibility
+    AllowancePair(Address, Address),
+    /// Legacy whitelisted key for compatibility
+    Whitelisted(Address),
+    /// Legacy token metadata: name
     Name,
-    /// Token metadata: symbol
+    /// Legacy token metadata: symbol
     Symbol,
-    /// Token metadata: decimals
+    /// Legacy token metadata: decimals
     Decimals,
     /// Total supply of tokens
     TotalSupply,
-    /// Individual account balance: Balance(account_address)
-    Balance(Address),
-    /// Whitelist status: Whitelisted(account_address) -> bool
-    Whitelisted(Address),
-    /// Transfer allowance: Allowance(owner, spender)
-    Allowance(Address, Address),
     /// Contract initialization status
     Initialized,
 }
@@ -73,7 +96,7 @@ pub struct RwaTokenContract;
 #[contractimpl]
 impl RwaTokenContract {
     /// Initialize the RWA token contract
-    /// Can only be called once and sets up the token metadata
+    /// Can only be called once and sets up the token metadata and initial supply
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -90,7 +113,15 @@ impl RwaTokenContract {
         // Require admin authorization
         admin.require_auth();
 
-        // Store token metadata
+        // Store token state metadata
+        let token_state = TokenState {
+            name: name.clone(),
+            symbol: symbol.clone(),
+            decimals,
+        };
+        env.storage().instance().set(&DataKey::State, &token_state);
+
+        // Store individual configuration keys in instance storage
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
@@ -98,14 +129,19 @@ impl RwaTokenContract {
         env.storage().instance().set(&DataKey::TotalSupply, &total_supply);
         env.storage().instance().set(&DataKey::Initialized, &true);
 
-        // Set initial balance to admin
-        env.storage().persistent().set(&DataKey::Balance(admin.clone()), &total_supply);
-        // Extend TTL for admin balance
-        env.storage().persistent().extend_ttl(&DataKey::Balance(admin.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        // Set initial balance to admin in persistent storage and extend TTL
+        let admin_bal_key = DataKey::Balance(admin.clone());
+        env.storage().persistent().set(&admin_bal_key, &total_supply);
+        env.storage().persistent().extend_ttl(&admin_bal_key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
 
         // Automatically whitelist the admin
-        env.storage().persistent().set(&DataKey::Whitelisted(admin.clone()), &true);
-        env.storage().persistent().extend_ttl(&DataKey::Whitelisted(admin.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        let admin_wl_key = DataKey::Whitelist(admin.clone());
+        env.storage().persistent().set(&admin_wl_key, &true);
+        env.storage().persistent().extend_ttl(&admin_wl_key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+
+        let legacy_wl_key = DataKey::Whitelisted(admin.clone());
+        env.storage().persistent().set(&legacy_wl_key, &true);
+        env.storage().persistent().extend_ttl(&legacy_wl_key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
 
         // Publish initialization event
         env.events().publish(
@@ -122,10 +158,23 @@ impl RwaTokenContract {
         Ok(())
     }
 
-    /// Get token information
+    /// Get token metadata information
     pub fn token_info(env: Env) -> Result<TokenInfo, Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
+
+        if let Some(state) = env.storage().instance().get::<_, TokenState>(&DataKey::State) {
+            let total_supply: i128 = env.storage().instance().get(&DataKey::TotalSupply)
+                .ok_or(Error::Unauthorized)?;
+            return Ok(TokenInfo {
+                name: state.name,
+                symbol: state.symbol,
+                decimals: state.decimals,
+                total_supply,
+                admin,
+            });
+        }
+
         let name: String = env.storage().instance().get(&DataKey::Name)
             .ok_or(Error::Unauthorized)?;
         let symbol: String = env.storage().instance().get(&DataKey::Symbol)
@@ -142,6 +191,12 @@ impl RwaTokenContract {
             total_supply,
             admin,
         })
+    }
+
+    /// Get token state metadata (name, symbol, decimals)
+    pub fn state(env: Env) -> Result<TokenState, Error> {
+        env.storage().instance().get(&DataKey::State)
+            .ok_or(Error::Unauthorized)
     }
 
     /// Get the contract administrator
@@ -163,19 +218,33 @@ impl RwaTokenContract {
 
     /// Check if account is whitelisted and automatically extend storage TTL if entry exists
     pub fn is_whitelisted(env: Env, account: Address) -> bool {
-        let key = DataKey::Whitelisted(account);
-        if env.storage().persistent().has(&key) {
-            env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
-        }
-        env.storage().persistent()
-            .get(&key)
-            .unwrap_or(false)
+        let key_wl = DataKey::Whitelist(account.clone());
+        let val_wl = if env.storage().persistent().has(&key_wl) {
+            env.storage().persistent().extend_ttl(&key_wl, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+            env.storage().persistent().get(&key_wl).unwrap_or(false)
+        } else {
+            false
+        };
+
+        let key_wld = DataKey::Whitelisted(account);
+        let val_wld = if env.storage().persistent().has(&key_wld) {
+            env.storage().persistent().extend_ttl(&key_wld, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+            env.storage().persistent().get(&key_wld).unwrap_or(false)
+        } else {
+            false
+        };
+
+        val_wl || val_wld
     }
 
-    /// Add account to whitelist (admin only)
-    pub fn add_to_whitelist(env: Env, account: Address) -> Result<(), Error> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+    /// Add account to whitelist (admin only, specification standard)
+    pub fn add_to_whitelist(env: Env, admin: Address, account: Address) -> Result<(), Error> {
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
+
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
         admin.require_auth();
 
         // Check if already whitelisted
@@ -183,10 +252,14 @@ impl RwaTokenContract {
             return Err(Error::AlreadyWhitelisted);
         }
 
-        // Add to whitelist
-        let key = DataKey::Whitelisted(account.clone());
-        env.storage().persistent().set(&key, &true);
-        env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        // Add to whitelist in persistent storage
+        let key_wl = DataKey::Whitelist(account.clone());
+        env.storage().persistent().set(&key_wl, &true);
+        env.storage().persistent().extend_ttl(&key_wl, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+
+        let key_wld = DataKey::Whitelisted(account.clone());
+        env.storage().persistent().set(&key_wld, &true);
+        env.storage().persistent().extend_ttl(&key_wld, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
 
         // Publish whitelist event
         env.events().publish(
@@ -197,10 +270,14 @@ impl RwaTokenContract {
         Ok(())
     }
 
-    /// Remove account from whitelist (admin only)
-    pub fn remove_from_whitelist(env: Env, account: Address) -> Result<(), Error> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+    /// Remove account from whitelist (admin only, specification standard)
+    pub fn remove_from_whitelist(env: Env, admin: Address, account: Address) -> Result<(), Error> {
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
+
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
         admin.require_auth();
 
         // Check if currently whitelisted
@@ -209,9 +286,13 @@ impl RwaTokenContract {
         }
 
         // Remove from whitelist
-        let key = DataKey::Whitelisted(account.clone());
-        env.storage().persistent().set(&key, &false);
-        env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        let key_wl = DataKey::Whitelist(account.clone());
+        env.storage().persistent().set(&key_wl, &false);
+        env.storage().persistent().extend_ttl(&key_wl, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+
+        let key_wld = DataKey::Whitelisted(account.clone());
+        env.storage().persistent().set(&key_wld, &false);
+        env.storage().persistent().extend_ttl(&key_wld, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
 
         // Publish whitelist removal event
         env.events().publish(
@@ -222,15 +303,19 @@ impl RwaTokenContract {
         Ok(())
     }
 
-    /// Set account whitelist status (admin only)
+    /// Set account whitelist status (admin only, backward-compatible helper)
     pub fn set_whitelist(env: Env, account: Address, status: bool) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
         admin.require_auth();
 
-        let key = DataKey::Whitelisted(account.clone());
-        env.storage().persistent().set(&key, &status);
-        env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        let key_wl = DataKey::Whitelist(account.clone());
+        env.storage().persistent().set(&key_wl, &status);
+        env.storage().persistent().extend_ttl(&key_wl, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+
+        let key_wld = DataKey::Whitelisted(account.clone());
+        env.storage().persistent().set(&key_wld, &status);
+        env.storage().persistent().extend_ttl(&key_wld, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
 
         // Publish whitelist event
         env.events().publish(
@@ -255,7 +340,7 @@ impl RwaTokenContract {
             return Err(Error::InvalidAmount);
         }
 
-        // Check whitelist status for both accounts
+        // Check whitelist compliance for both sender and recipient
         if !Self::is_whitelisted(env.clone(), from.clone()) {
             return Err(Error::NotWhitelisted);
         }
@@ -278,8 +363,24 @@ impl RwaTokenContract {
         // Extend TTL for both accounts (balances and whitelist states)
         env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
-        env.storage().persistent().extend_ttl(&DataKey::Whitelisted(from.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
-        env.storage().persistent().extend_ttl(&DataKey::Whitelisted(to.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+
+        let key_wl_from = DataKey::Whitelist(from.clone());
+        if env.storage().persistent().has(&key_wl_from) {
+            env.storage().persistent().extend_ttl(&key_wl_from, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
+        let key_wld_from = DataKey::Whitelisted(from.clone());
+        if env.storage().persistent().has(&key_wld_from) {
+            env.storage().persistent().extend_ttl(&key_wld_from, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
+
+        let key_wl_to = DataKey::Whitelist(to.clone());
+        if env.storage().persistent().has(&key_wl_to) {
+            env.storage().persistent().extend_ttl(&key_wl_to, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
+        let key_wld_to = DataKey::Whitelisted(to.clone());
+        if env.storage().persistent().has(&key_wld_to) {
+            env.storage().persistent().extend_ttl(&key_wld_to, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
 
         // Publish transfer event
         env.events().publish(
@@ -304,10 +405,17 @@ impl RwaTokenContract {
             return Err(Error::InvalidAmount);
         }
 
-        // Set allowance
-        let key = DataKey::Allowance(owner.clone(), spender.clone());
+        // Set allowance with AllowanceKey
+        let key = DataKey::Allowance(AllowanceKey {
+            owner: owner.clone(),
+            spender: spender.clone(),
+        });
         env.storage().persistent().set(&key, &amount);
         env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+
+        let pair_key = DataKey::AllowancePair(owner.clone(), spender.clone());
+        env.storage().persistent().set(&pair_key, &amount);
+        env.storage().persistent().extend_ttl(&pair_key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
 
         // Publish approval event
         env.events().publish(
@@ -320,13 +428,22 @@ impl RwaTokenContract {
 
     /// Get allowance amount and extend storage TTL if entry exists
     pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
-        let key = DataKey::Allowance(owner, spender);
+        let key = DataKey::Allowance(AllowanceKey {
+            owner: owner.clone(),
+            spender: spender.clone(),
+        });
         if env.storage().persistent().has(&key) {
             env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+            return env.storage().persistent().get(&key).unwrap_or(0);
         }
-        env.storage().persistent()
-            .get(&key)
-            .unwrap_or(0)
+
+        let pair_key = DataKey::AllowancePair(owner, spender);
+        if env.storage().persistent().has(&pair_key) {
+            env.storage().persistent().extend_ttl(&pair_key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+            return env.storage().persistent().get(&pair_key).unwrap_or(0);
+        }
+
+        0
     }
 
     /// Transfer tokens using allowance (requires both accounts to be whitelisted)
@@ -371,14 +488,39 @@ impl RwaTokenContract {
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(to_balance + amount));
 
         // Update allowance
-        env.storage().persistent().set(&DataKey::Allowance(from.clone(), spender.clone()), &(current_allowance - amount));
+        let new_allowance = current_allowance - amount;
+        let key = DataKey::Allowance(AllowanceKey {
+            owner: from.clone(),
+            spender: spender.clone(),
+        });
+        env.storage().persistent().set(&key, &new_allowance);
+        env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+
+        let pair_key = DataKey::AllowancePair(from.clone(), spender.clone());
+        env.storage().persistent().set(&pair_key, &new_allowance);
+        env.storage().persistent().extend_ttl(&pair_key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
 
         // Extend TTL for all storage keys (balances, allowance, and whitelist states)
         env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
-        env.storage().persistent().extend_ttl(&DataKey::Allowance(from.clone(), spender.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
-        env.storage().persistent().extend_ttl(&DataKey::Whitelisted(from.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
-        env.storage().persistent().extend_ttl(&DataKey::Whitelisted(to.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+
+        let key_wl_from = DataKey::Whitelist(from.clone());
+        if env.storage().persistent().has(&key_wl_from) {
+            env.storage().persistent().extend_ttl(&key_wl_from, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
+        let key_wld_from = DataKey::Whitelisted(from.clone());
+        if env.storage().persistent().has(&key_wld_from) {
+            env.storage().persistent().extend_ttl(&key_wld_from, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
+
+        let key_wl_to = DataKey::Whitelist(to.clone());
+        if env.storage().persistent().has(&key_wl_to) {
+            env.storage().persistent().extend_ttl(&key_wl_to, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
+        let key_wld_to = DataKey::Whitelisted(to.clone());
+        if env.storage().persistent().has(&key_wld_to) {
+            env.storage().persistent().extend_ttl(&key_wld_to, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
 
         // Publish transfer event
         env.events().publish(
@@ -415,7 +557,14 @@ impl RwaTokenContract {
 
         // Extend TTL
         env.storage().persistent().extend_ttl(&DataKey::Balance(to.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
-        env.storage().persistent().extend_ttl(&DataKey::Whitelisted(to.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        let key_wl_to = DataKey::Whitelist(to.clone());
+        if env.storage().persistent().has(&key_wl_to) {
+            env.storage().persistent().extend_ttl(&key_wl_to, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
+        let key_wld_to = DataKey::Whitelisted(to.clone());
+        if env.storage().persistent().has(&key_wld_to) {
+            env.storage().persistent().extend_ttl(&key_wld_to, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
 
         // Publish mint event
         env.events().publish(
@@ -457,8 +606,13 @@ impl RwaTokenContract {
 
         // Extend TTL
         env.storage().persistent().extend_ttl(&DataKey::Balance(from.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
-        if env.storage().persistent().has(&DataKey::Whitelisted(from.clone())) {
-            env.storage().persistent().extend_ttl(&DataKey::Whitelisted(from.clone()), STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        let key_wl_from = DataKey::Whitelist(from.clone());
+        if env.storage().persistent().has(&key_wl_from) {
+            env.storage().persistent().extend_ttl(&key_wl_from, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+        }
+        let key_wld_from = DataKey::Whitelisted(from.clone());
+        if env.storage().persistent().has(&key_wld_from) {
+            env.storage().persistent().extend_ttl(&key_wld_from, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
         }
 
         // Publish burn event
@@ -532,6 +686,7 @@ mod test {
         let env = Env::default();
         let (admin, client) = setup_test_contract(&env);
         let user = Address::generate(&env);
+        let non_admin = Address::generate(&env);
 
         // Initialize contract
         let name = String::from_str(&env, "Test Token");
@@ -541,20 +696,28 @@ mod test {
         // User should not be whitelisted initially
         assert!(!client.is_whitelisted(&user));
 
-        // Add to whitelist
-        client.add_to_whitelist(&user);
+        // Non-admin cannot whitelist
+        let fail_res = client.try_add_to_whitelist(&non_admin, &user);
+        assert_eq!(fail_res, Err(Ok(Error::Unauthorized)));
+
+        // Admin adds to whitelist
+        client.add_to_whitelist(&admin, &user);
         assert!(client.is_whitelisted(&user));
 
         // Adding again should fail
-        let result2 = client.try_add_to_whitelist(&user);
+        let result2 = client.try_add_to_whitelist(&admin, &user);
         assert_eq!(result2, Err(Ok(Error::AlreadyWhitelisted)));
 
-        // Remove from whitelist
-        client.remove_from_whitelist(&user);
+        // Non-admin cannot remove from whitelist
+        let fail_remove = client.try_remove_from_whitelist(&non_admin, &user);
+        assert_eq!(fail_remove, Err(Ok(Error::Unauthorized)));
+
+        // Admin removes from whitelist
+        client.remove_from_whitelist(&admin, &user);
         assert!(!client.is_whitelisted(&user));
 
         // Removing again should fail
-        let result4 = client.try_remove_from_whitelist(&user);
+        let result4 = client.try_remove_from_whitelist(&admin, &user);
         assert_eq!(result4, Err(Ok(Error::NotCurrentlyWhitelisted)));
     }
 
@@ -571,8 +734,8 @@ mod test {
         client.initialize(&admin, &name, &symbol, &8u32, &1000i128);
 
         // Whitelist users
-        client.add_to_whitelist(&user1);
-        client.add_to_whitelist(&user2);
+        client.add_to_whitelist(&admin, &user1);
+        client.add_to_whitelist(&admin, &user2);
 
         // Transfer some tokens to user1
         let transfer_amount = 100i128;
@@ -601,7 +764,7 @@ mod test {
         client.initialize(&admin, &name, &symbol, &8u32, &1000i128);
 
         // Only whitelist user1
-        client.add_to_whitelist(&user1);
+        client.add_to_whitelist(&admin, &user1);
 
         // Transfer from admin to non-whitelisted user2 should fail
         let result = client.try_transfer(&admin, &user2, &100i128);
@@ -624,7 +787,7 @@ mod test {
         client.initialize(&admin, &name, &symbol, &8u32, &1000i128);
 
         // Whitelist user
-        client.add_to_whitelist(&user);
+        client.add_to_whitelist(&admin, &user);
 
         // Try to transfer more than balance
         let result = client.try_transfer(&user, &admin, &100i128);
@@ -645,9 +808,9 @@ mod test {
         client.initialize(&admin, &name, &symbol, &8u32, &1000i128);
 
         // Whitelist all accounts
-        client.add_to_whitelist(&owner);
-        client.add_to_whitelist(&spender);
-        client.add_to_whitelist(&recipient);
+        client.add_to_whitelist(&admin, &owner);
+        client.add_to_whitelist(&admin, &spender);
+        client.add_to_whitelist(&admin, &recipient);
 
         // Transfer tokens to owner
         client.transfer(&admin, &owner, &500i128);
@@ -680,7 +843,7 @@ mod test {
         client.initialize(&admin, &name, &symbol, &8u32, &initial_supply);
 
         // Whitelist user
-        client.add_to_whitelist(&user);
+        client.add_to_whitelist(&admin, &user);
 
         // Mint tokens to user
         let mint_amount = 500i128;
@@ -721,7 +884,7 @@ mod test {
         client.initialize(&admin, &name, &symbol, &8u32, &initial_supply);
 
         // Whitelist user and transfer tokens
-        client.add_to_whitelist(&user);
+        client.add_to_whitelist(&admin, &user);
         client.transfer(&admin, &user, &300i128);
 
         // Burn tokens from user account
@@ -746,7 +909,7 @@ mod test {
         client.initialize(&admin, &name, &symbol, &8u32, &1000i128);
 
         // Whitelist user
-        client.add_to_whitelist(&user);
+        client.add_to_whitelist(&admin, &user);
 
         // Try to burn more than balance
         let result = client.try_burn(&user, &100i128);
@@ -765,7 +928,7 @@ mod test {
         client.initialize(&admin, &name, &symbol, &8u32, &1000i128);
 
         // Whitelist user
-        client.add_to_whitelist(&user);
+        client.add_to_whitelist(&admin, &user);
 
         // Test invalid transfer amount
         let result = client.try_transfer(&admin, &user, &0i128);
@@ -960,7 +1123,13 @@ mod test {
         env.as_contract(&client.address, || {
             assert_eq!(env.storage().persistent().get_ttl(&DataKey::Balance(owner.clone())), STORAGE_TTL_EXTEND_TO);
             assert_eq!(env.storage().persistent().get_ttl(&DataKey::Balance(recipient.clone())), STORAGE_TTL_EXTEND_TO);
-            assert_eq!(env.storage().persistent().get_ttl(&DataKey::Allowance(owner.clone(), spender.clone())), STORAGE_TTL_EXTEND_TO);
+            let allow_key = DataKey::Allowance(AllowanceKey {
+                owner: owner.clone(),
+                spender: spender.clone(),
+            });
+            assert_eq!(env.storage().persistent().get_ttl(&allow_key), STORAGE_TTL_EXTEND_TO);
+            let pair_key = DataKey::AllowancePair(owner.clone(), spender.clone());
+            assert_eq!(env.storage().persistent().get_ttl(&pair_key), STORAGE_TTL_EXTEND_TO);
             assert_eq!(env.storage().persistent().get_ttl(&DataKey::Whitelisted(owner.clone())), STORAGE_TTL_EXTEND_TO);
             assert_eq!(env.storage().persistent().get_ttl(&DataKey::Whitelisted(recipient.clone())), STORAGE_TTL_EXTEND_TO);
         });
