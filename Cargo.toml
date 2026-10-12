@@ -18,4 +18,10 @@ soroban-sdk = "27.0.0"
 [profile.release]
 opt-level = "z"
 overflow-checks = true
+lto = true
+codegen-units = 1
+panic = "abort"
 
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true
