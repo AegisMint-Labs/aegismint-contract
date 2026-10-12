@@ -16,7 +16,7 @@ mod marketplace_escrow;
 
 use asset_factory::{AssetFactoryContract, AssetFactoryContractClient, Error as FactoryError};
 use rwa_token::{RwaTokenContract, RwaTokenContractClient, Error as TokenError, DataKey as TokenKey, STORAGE_TTL_EXTEND_TO};
-use marketplace_escrow::{MarketplaceEscrowContract, MarketplaceEscrowContractClient, EscrowState, Error as EscrowError};
+use marketplace_escrow::{MarketplaceEscrowContract, MarketplaceEscrowContractClient, EscrowState, EscrowStatus, Error as EscrowError};
 
 /// Integration Test 1: RWA Token Whitelisting and Storage TTL Lifecycle
 #[test]
@@ -148,7 +148,7 @@ fn test_marketplace_escrow_complete_fulfillment() {
     // Seller approves escrow contract to deposit tokens
     let escrow_token_amount = 100_000i128;
     let escrow_payment_amount = 250_000i128;
-    let timeout_seconds = 7200u64;
+    let timeout_seconds = 7200u32;
 
     token_client.approve(&seller, &escrow_id, &escrow_token_amount);
     assert_eq!(token_client.allowance(&seller, &escrow_id), escrow_token_amount);
@@ -177,13 +177,20 @@ fn test_marketplace_escrow_complete_fulfillment() {
     assert_eq!(escrow_data.payment_amount, escrow_payment_amount);
     assert_eq!(escrow_data.state, EscrowState::Active);
 
+    let escrow_details = escrow_client.get_escrow_details(&order_id);
+    assert_eq!(escrow_details.id, order_id);
+    assert_eq!(escrow_details.status, EscrowStatus::Active);
+
     // Complete escrow (buyer fulfills payment)
-    escrow_client.complete_escrow(&order_id);
+    escrow_client.fulfill_escrow(&buyer, &order_id);
 
     // Verify final state and token delivery
     let completed_data = escrow_client.get_escrow(&order_id);
     assert_eq!(completed_data.state, EscrowState::Completed);
     assert!(completed_data.completed_at.is_some());
+
+    let completed_details = escrow_client.get_escrow_details(&order_id);
+    assert_eq!(completed_details.status, EscrowStatus::Completed);
 
     assert_eq!(token_client.balance(&buyer), escrow_token_amount);
     assert_eq!(token_client.balance(&escrow_id), 0);
@@ -237,25 +244,38 @@ fn test_marketplace_escrow_seller_cancellation() {
         &token_id,
         &seller_deposit,
         &150_000i128,
-        &7200u64,
+        &7200u32,
     );
 
     assert_eq!(token_client.balance(&seller), 0);
     assert_eq!(token_client.balance(&escrow_id), seller_deposit);
 
-    // Seller cancels escrow
-    escrow_client.cancel_escrow(&order_id);
+    // Attempting to cancel before timeout expires must fail
+    let err_early_cancel = escrow_client.try_cancel_escrow(&seller, &order_id);
+    assert_eq!(err_early_cancel, Err(Ok(EscrowError::EscrowNotExpired)));
+
+    // Advance ledger timestamp and sequence beyond timeout threshold
+    env.ledger().with_mut(|li| {
+        li.timestamp += 7201;
+        li.sequence_number += 7201;
+    });
+
+    // Seller cancels escrow after timeout
+    escrow_client.cancel_escrow(&seller, &order_id);
 
     // Verify cancellation state and refunded token balance
     let cancelled_data = escrow_client.get_escrow(&order_id);
     assert_eq!(cancelled_data.state, EscrowState::Cancelled);
     assert!(cancelled_data.completed_at.is_some());
 
+    let cancelled_details = escrow_client.get_escrow_details(&order_id);
+    assert_eq!(cancelled_details.status, EscrowStatus::Cancelled);
+
     assert_eq!(token_client.balance(&seller), seller_deposit);
     assert_eq!(token_client.balance(&escrow_id), 0);
 
     // Attempting to cancel again should fail
-    let err_double_cancel = escrow_client.try_cancel_escrow(&order_id);
+    let err_double_cancel = escrow_client.try_cancel_escrow(&seller, &order_id);
     assert_eq!(err_double_cancel, Err(Ok(EscrowError::InvalidEscrowState)));
 
     // Attempting to complete cancelled escrow should fail
@@ -381,7 +401,7 @@ fn test_end_to_end_aegismint_platform_integration() {
     // Primary buyer lists 400,000 tokens for secondary buyer
     let sale_amount = 400_000i128;
     let payment_amount = 1_200_000i128;
-    let timeout = 14400u64;
+    let timeout = 14400u32;
 
     token_client.approve(&primary_buyer, &escrow_id, &sale_amount);
     let order_id = escrow_client.create_escrow(
