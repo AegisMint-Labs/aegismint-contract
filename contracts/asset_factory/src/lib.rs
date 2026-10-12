@@ -24,13 +24,22 @@ pub enum Error {
     InvalidParameters = 6,
 }
 
+/// Persistent storage TTL threshold in ledgers (~10 days at 5s/ledger)
+pub const STORAGE_TTL_THRESHOLD: u32 = 172_800;
+/// Persistent storage TTL extension amount in ledgers (~10 days at 5s/ledger)
+pub const STORAGE_TTL_EXTEND_TO: u32 = 172_800;
+
 /// Storage keys for the Asset Factory contract
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     /// Contract administrator address
     Admin,
-    /// Approved WASM hash for RWA token deployments
+    /// Approved WASM hash for RWA token deployments (specification standard)
+    ApprovedWasmHash,
+    /// Registry vector of all deployed token contract addresses
+    TokenRegistry,
+    /// Approved WASM hash alias for backwards compatibility
     ApprovedWasm,
     /// Total number of deployed assets
     AssetCount,
@@ -78,9 +87,12 @@ impl AssetFactoryContract {
         // Require admin authorization
         admin.require_auth();
 
-        // Store configuration
+        // Store configuration in Instance storage
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::ApprovedWasmHash, &approved_wasm_hash);
         env.storage().instance().set(&DataKey::ApprovedWasm, &approved_wasm_hash);
+        let registry: Vec<Address> = Vec::new(&env);
+        env.storage().instance().set(&DataKey::TokenRegistry, &registry);
         env.storage().instance().set(&DataKey::AssetCount, &0u64);
         env.storage().instance().set(&DataKey::Initialized, &true);
 
@@ -101,20 +113,33 @@ impl AssetFactoryContract {
 
     /// Get the approved WASM hash
     pub fn approved_wasm_hash(env: Env) -> Result<BytesN<32>, Error> {
-        env.storage().instance().get(&DataKey::ApprovedWasm)
+        env.storage().instance().get(&DataKey::ApprovedWasmHash)
+            .or_else(|| env.storage().instance().get(&DataKey::ApprovedWasm))
             .ok_or(Error::Unauthorized)
     }
 
-    /// Update the approved WASM hash (admin only)
-    pub fn update_approved_wasm_hash(
+    /// Get the registry of all deployed token addresses
+    pub fn token_registry(env: Env) -> Vec<Address> {
+        env.storage().instance().get(&DataKey::TokenRegistry)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Update the approved WASM hash (admin-only, specification standard)
+    pub fn update_wasm_hash(
         env: Env,
+        admin: Address,
         new_wasm_hash: BytesN<32>,
     ) -> Result<(), Error> {
-        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin)
             .ok_or(Error::Unauthorized)?;
+
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
 
         admin.require_auth();
 
+        env.storage().instance().set(&DataKey::ApprovedWasmHash, &new_wasm_hash);
         env.storage().instance().set(&DataKey::ApprovedWasm, &new_wasm_hash);
 
         // Publish update event
@@ -124,6 +149,16 @@ impl AssetFactoryContract {
         );
 
         Ok(())
+    }
+
+    /// Update the approved WASM hash (admin-only, backwards-compatible helper)
+    pub fn update_approved_wasm_hash(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(Error::Unauthorized)?;
+        Self::update_wasm_hash(env, admin, new_wasm_hash)
     }
 
     /// Deploy a new RWA token instance
@@ -145,7 +180,8 @@ impl AssetFactoryContract {
         }
 
         // Get approved WASM hash
-        let wasm_hash: BytesN<32> = env.storage().instance().get(&DataKey::ApprovedWasm)
+        let wasm_hash: BytesN<32> = env.storage().instance().get(&DataKey::ApprovedWasmHash)
+            .or_else(|| env.storage().instance().get(&DataKey::ApprovedWasm))
             .ok_or(Error::InvalidWasmHash)?;
 
         // Deploy the contract using deterministic deployment
@@ -168,6 +204,12 @@ impl AssetFactoryContract {
             return Err(Error::DeploymentFailed);
         }
 
+        // Register deployed address in TokenRegistry
+        let mut registry: Vec<Address> = env.storage().instance().get(&DataKey::TokenRegistry)
+            .unwrap_or_else(|| Vec::new(&env));
+        registry.push_back(deployed_address.clone());
+        env.storage().instance().set(&DataKey::TokenRegistry, &registry);
+
         // Increment asset count
         let asset_count: u64 = env.storage().instance().get(&DataKey::AssetCount).unwrap_or(0);
         let new_asset_id = asset_count + 1;
@@ -187,10 +229,26 @@ impl AssetFactoryContract {
             salt,
         };
 
-        env.storage().instance().set(&DataKey::Asset(new_asset_id), &asset_info);
-        env.storage().instance().set(&DataKey::AssetByAddress(deployed_address.clone()), &new_asset_id);
+        // Store in persistent storage with explicit TTL extension
+        let asset_key = DataKey::Asset(new_asset_id);
+        env.storage().persistent().set(&asset_key, &asset_info);
+        env.storage().persistent().extend_ttl(&asset_key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
 
-        // Publish deployment event
+        let addr_key = DataKey::AssetByAddress(deployed_address.clone());
+        env.storage().persistent().set(&addr_key, &new_asset_id);
+        env.storage().persistent().extend_ttl(&addr_key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+
+        // Mirror in instance storage for fast retrieval
+        env.storage().instance().set(&asset_key, &asset_info);
+        env.storage().instance().set(&addr_key, &new_asset_id);
+
+        // Publish TokenDeployed event (specification standard)
+        env.events().publish(
+            (Symbol::new(&env, "TokenDeployed"), deployed_address.clone(), deployer.clone()),
+            (token_admin.clone(), new_asset_id),
+        );
+
+        // Publish asset_deployed event for backwards compatibility
         env.events().publish(
             (Symbol::new(&env, "asset_deployed"), deployed_address.clone(), deployer),
             asset_info,
@@ -199,17 +257,26 @@ impl AssetFactoryContract {
         Ok(deployed_address)
     }
 
-    /// Get asset information by ID
+    /// Get asset information by ID with TTL extension
     pub fn get_asset(env: Env, asset_id: u64) -> Result<AssetInfo, Error> {
-        env.storage().instance().get(&DataKey::Asset(asset_id))
+        let key = DataKey::Asset(asset_id);
+        if env.storage().persistent().has(&key) {
+            env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+            return env.storage().persistent().get(&key).ok_or(Error::AssetNotFound);
+        }
+        env.storage().instance().get(&key)
             .ok_or(Error::AssetNotFound)
     }
 
-    /// Get asset information by contract address
+    /// Get asset information by contract address with TTL extension
     pub fn get_asset_by_address(env: Env, contract_address: Address) -> Result<AssetInfo, Error> {
-        let asset_id: u64 = env.storage().instance()
-            .get(&DataKey::AssetByAddress(contract_address))
-            .ok_or(Error::AssetNotFound)?;
+        let key = DataKey::AssetByAddress(contract_address);
+        let asset_id: u64 = if env.storage().persistent().has(&key) {
+            env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+            env.storage().persistent().get(&key).ok_or(Error::AssetNotFound)?
+        } else {
+            env.storage().instance().get(&key).ok_or(Error::AssetNotFound)?
+        };
 
         Self::get_asset(env, asset_id)
     }
@@ -257,7 +324,12 @@ impl AssetFactoryContract {
 
     /// Verify if a contract address was deployed by this factory
     pub fn is_factory_deployed(env: Env, contract_address: Address) -> bool {
-        env.storage().instance().has(&DataKey::AssetByAddress(contract_address))
+        let key = DataKey::AssetByAddress(contract_address);
+        if env.storage().persistent().has(&key) {
+            env.storage().persistent().extend_ttl(&key, STORAGE_TTL_THRESHOLD, STORAGE_TTL_EXTEND_TO);
+            return true;
+        }
+        env.storage().instance().has(&key)
     }
 }
 
@@ -430,5 +502,36 @@ mod test {
 
         // Test with random address (should return false)
         assert!(!client.is_factory_deployed(&random_address));
+    }
+
+    #[test]
+    fn test_update_wasm_hash_with_admin() {
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
+        let initial_wasm = BytesN::from_array(&env, &[1u8; 32]);
+        let new_wasm = BytesN::from_array(&env, &[5u8; 32]);
+        let unauthorized = Address::generate(&env);
+
+        client.initialize(&admin, &initial_wasm);
+
+        // Unauthorized caller fails
+        let fail_res = client.try_update_wasm_hash(&unauthorized, &new_wasm);
+        assert_eq!(fail_res, Err(Ok(Error::Unauthorized)));
+
+        // Admin succeeds
+        client.update_wasm_hash(&admin, &new_wasm);
+        assert_eq!(client.approved_wasm_hash(), new_wasm);
+    }
+
+    #[test]
+    fn test_token_registry_initialized() {
+        let env = Env::default();
+        let (admin, client) = setup_test_factory(&env);
+        let wasm_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+        client.initialize(&admin, &wasm_hash);
+
+        let registry = client.token_registry();
+        assert_eq!(registry.len(), 0);
     }
 }
